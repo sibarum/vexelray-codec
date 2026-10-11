@@ -1,0 +1,213 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <groupId>dev.vexelray.codec</groupId>
+    <artifactId>vexelray-codec</artifactId>
+    <version>0.1.0-SNAPSHOT</version>
+    <packaging>pom</packaging>
+
+    <name>vexelray-codec</name>
+    <description>
+        Media files on a VexelRay GUI: the VexelRay-specific half of each codec, over a wrapper that does the
+        decoding. An optional component. Applications and demos depend on it; nothing in the framework or the
+        GUI stack does, so a binary that shows no pictures links no decoder.
+    </description>
+
+    <modules>
+        <!-- Pictures: any file imagelib-wrapper decodes (PNG, JPEG, GIF, WebP, SVG and the rest, animated where
+             the file is), packed into one sheet per picture, uploaded once, and shown on a node. No platform
+             code of its own: the decoder's natives are imagelib-wrapper's, which bundles them per platform. -->
+        <module>vexelray-codec-image</module>
+    </modules>
+
+    <!--
+      Platform-specific code goes in a platform module of its own, never in a module above. A codec whose wrapper
+      needs something per OS that the wrapper cannot carry itself gets a vexelray-codec-<kind>-<os> module for
+      each OS (windows, linux, macos, all three from day one, the unbuilt ones stubs), and the application selects
+      one with an OS-activated profile, as vexelray/docs/native-bindings.md §3.1 describes. Not in this parent: a
+      profile here is inherited by every module and would put a platform dependency under the portable ones.
+    -->
+
+    <properties>
+        <maven.compiler.release>25</maven.compiler.release>
+        <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+
+        <!-- The stack, installed to the local .m2 from the sibling checkouts. -->
+        <vexelray.version>0.1.0-SNAPSHOT</vexelray.version>
+        <vexelray.gui.version>0.1.0-SNAPSHOT</vexelray.gui.version>
+        <vexelray.framework.version>0.1.0-SNAPSHOT</vexelray.framework.version>
+        <atchung.version>1.0-SNAPSHOT</atchung.version>
+        <kronometer.version>1.0-SNAPSHOT</kronometer.version>
+        <imagelib.version>0.1.0-SNAPSHOT</imagelib.version>
+
+        <junit.version>5.11.4</junit.version>
+    </properties>
+
+    <dependencyManagement>
+        <dependencies>
+            <!-- Reactor-internal modules: children and applications reference these without a version. -->
+            <dependency>
+                <groupId>dev.vexelray.codec</groupId>
+                <artifactId>vexelray-codec-image</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+
+            <!-- The decoders. Each wrapper owns its natives; a codec module here never loads a library itself. -->
+            <dependency>
+                <groupId>sibarum.imagelib</groupId>
+                <artifactId>imagelib-wrapper</artifactId>
+                <version>${imagelib.version}</version>
+            </dependency>
+
+            <!-- The GUI a picture is placed on: Gui, Node, GuiApp.texture, ImageRegion. -->
+            <dependency>
+                <groupId>dev.vexelray.gui</groupId>
+                <artifactId>vexelray-gui-core</artifactId>
+                <version>${vexelray.gui.version}</version>
+            </dependency>
+            <!-- Sketch: the checkerboard behind a transparent picture. -->
+            <dependency>
+                <groupId>dev.vexelray.gui</groupId>
+                <artifactId>vexelray-gui-draw</artifactId>
+                <version>${vexelray.gui.version}</version>
+            </dependency>
+            <!-- The clock an animation and a transition run on. -->
+            <dependency>
+                <groupId>dev.vexelray.gui</groupId>
+                <artifactId>vexelray-gui-krono</artifactId>
+                <version>${vexelray.gui.version}</version>
+            </dependency>
+            <!-- Color. Transitive through gui-core, declared because it is imported. -->
+            <dependency>
+                <groupId>dev.vexelray</groupId>
+                <artifactId>vexelray-canvas</artifactId>
+                <version>${vexelray.version}</version>
+            </dependency>
+            <!-- Dur and Time, and Ease. Transitive through gui-krono, declared because they are imported. -->
+            <dependency>
+                <groupId>sibarum.kronometer</groupId>
+                <artifactId>kronometer-core</artifactId>
+                <version>${kronometer.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>sibarum.kronometer</groupId>
+                <artifactId>kronometer-anim</artifactId>
+                <version>${kronometer.version}</version>
+            </dependency>
+            <!-- AtlasTexture and SampledImage: what an upload is and what a node draws. Transitive through
+                 gui-core, declared because they are imported. -->
+            <dependency>
+                <groupId>dev.vexelray</groupId>
+                <artifactId>vexelray-vulkan</artifactId>
+                <version>${vexelray.version}</version>
+            </dependency>
+
+            <!-- The vocabulary a starter is written in: annotations only, JDK-only, CLASS retention. Depending on it
+                 is what lets an application name a codec's starter; it does not make the framework depend on this. -->
+            <dependency>
+                <groupId>dev.vexelray.framework</groupId>
+                <artifactId>vexelray-framework-api</artifactId>
+                <version>${vexelray.framework.version}</version>
+            </dependency>
+            <!-- Test scope only: a starter compiled the way an application meets it, by the real processor against
+                 the real shell. -->
+            <dependency>
+                <groupId>dev.vexelray.framework</groupId>
+                <artifactId>vexelray-framework-shell</artifactId>
+                <version>${vexelray.framework.version}</version>
+                <scope>test</scope>
+            </dependency>
+            <dependency>
+                <groupId>dev.vexelray.framework</groupId>
+                <artifactId>vexelray-framework-processor</artifactId>
+                <version>${vexelray.framework.version}</version>
+                <scope>test</scope>
+            </dependency>
+
+            <!-- The stack's one logger. -->
+            <dependency>
+                <groupId>sibarum.atchung</groupId>
+                <artifactId>atchung-probe</artifactId>
+                <version>${atchung.version}</version>
+            </dependency>
+
+            <dependency>
+                <groupId>org.junit</groupId>
+                <artifactId>junit-bom</artifactId>
+                <version>${junit.version}</version>
+                <type>pom</type>
+                <scope>import</scope>
+            </dependency>
+        </dependencies>
+    </dependencyManagement>
+
+    <dependencies>
+        <dependency>
+            <groupId>org.junit.jupiter</groupId>
+            <artifactId>junit-jupiter</artifactId>
+            <scope>test</scope>
+        </dependency>
+    </dependencies>
+
+    <build>
+        <pluginManagement>
+            <plugins>
+                <plugin>
+                    <groupId>org.apache.maven.plugins</groupId>
+                    <artifactId>maven-compiler-plugin</artifactId>
+                    <version>3.13.0</version>
+                    <!-- Explicit release on the plugin as well as the property, so IDEs pick up the Java 25
+                         language level reliably. Same as the sibling repos. -->
+                    <configuration>
+                        <target>${maven.compiler.release}</target>
+                        <release>${maven.compiler.release}</release>
+                        <compilerArgs>
+                            <!-- A {@link} to something that no longer exists is the one Javadoc defect a machine
+                                 can find. As in vexelray-framework. -->
+                            <arg>-Xdoclint:reference,syntax</arg>
+                        </compilerArgs>
+                    </configuration>
+                </plugin>
+                <plugin>
+                    <groupId>org.apache.maven.plugins</groupId>
+                    <artifactId>maven-surefire-plugin</artifactId>
+                    <version>3.5.2</version>
+                    <configuration>
+                        <!-- Codec tests decode for real, through the wrapper's native library. -->
+                        <argLine>--enable-native-access=ALL-UNNAMED</argLine>
+                    </configuration>
+                </plugin>
+            </plugins>
+        </pluginManagement>
+
+        <plugins>
+            <!-- LWJGL is not part of this stack, and nothing here may reach it, however indirectly. -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-enforcer-plugin</artifactId>
+                <version>3.5.0</version>
+                <executions>
+                    <execution>
+                        <id>no-lwjgl</id>
+                        <goals>
+                            <goal>enforce</goal>
+                        </goals>
+                        <configuration>
+                            <rules>
+                                <bannedDependencies>
+                                    <excludes>
+                                        <exclude>org.lwjgl</exclude>
+                                    </excludes>
+                                    <message>LWJGL is not part of the VexelRay stack: find which dependency brings it with mvn dependency:tree and remove that edge.</message>
+                                </bannedDependencies>
+                            </rules>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
+        </plugins>
+    </build>
+</project>
