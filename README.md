@@ -28,13 +28,17 @@ dev.vexelray.codec.image        pixels, and no GUI type. Blocking: run on Gui.of
                                 decode. A failure is a reason, never an exception.
   Decoded                       what Pictures returns: what the source is, and a Picture per size, or why not.
   Picture                       every frame packed into one RGBA8 sheet, scaled down and never up.
+  Original                      a still at its own full size, any part of which is made at any size: a raster
+                                resampled, a vector rasterised again. One at a time: a photograph's is large.
+  Resample                      any ImageFilter (vexelray-canvas), exact at any scale, in linear light, premultiplied.
   Stamp                         which version of a file: the key for anything cached from it.
   Lru                           a cache bounded by weight, least recently used out first.
 
 dev.vexelray.codec.image.gui    on vexelray-gui.
   Textures                      pictures on the GPU: uploaded once, recent ones kept, the rest to GuiApp.release.
   ImageView                     one picture on a node: fitted, animated, sliding in from the side it came from,
-                                over a backdrop (dark, light, checker, magenta, green) for its transparent pixels.
+                                over a backdrop (dark, light, checker, magenta, green) for its transparent pixels,
+                                and posed by its caller: zoomed, moved and turned (Pose), as visual transforms.
   ImageStarter                  for a framework application: Textures, bound to the window and unbound at shutdown.
 ```
 

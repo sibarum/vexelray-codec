@@ -2,6 +2,7 @@ package dev.vexelray.codec.image.gui;
 
 import dev.vexelray.codec.image.Picture;
 import dev.vexelray.canvas.Color;
+import dev.vexelray.canvas.ImageFilter;
 import dev.vexelray.gui.core.Gui;
 import dev.vexelray.gui.core.ImageRegion;
 import dev.vexelray.gui.core.Node;
@@ -17,6 +18,7 @@ import sibarum.kronometer.Dur;
 import sibarum.kronometer.Time;
 import sibarum.kronometer.anim.Ease;
 
+import java.util.List;
 import java.util.concurrent.atomic.AtomicInteger;
 
 /**
@@ -48,6 +50,13 @@ import java.util.concurrent.atomic.AtomicInteger;
  * <p><b>Two boxes per layer, so the backdrop is under the picture.</b> A node draws its own drawing over its own image,
  * so the checkerboard is the drawing of a layer's frame and the picture is the image of a plate that fills it.
  *
+ * <p><b>Zoomed, moved and turned by its caller.</b> The picture in front can be given a {@link Pose}: a size relative
+ * to the one it fits at, an offset from the centre, and a turn. It is drawn with the visual transforms
+ * ({@code Node.translate}, {@code scale}, {@code rotate}) on the fitted frame, never by laying the frame out again: a
+ * float is held inside its parent, and a pose that changes every frame should lay nothing out. The view only draws
+ * the pose; the gestures that change it, and the limits on where the picture may go, are the caller's, which
+ * {@link #fitted} gives the measures for. The stage clips, so a picture larger than it is cut at its edges.
+ *
  * <p><b>Letting go.</b> {@link #clear} stops every animation and stops naming every texture, which is all
  * {@code GuiApp.release} asks before it may close one. Everything here is made once per view and shown or hidden.
  */
@@ -70,6 +79,33 @@ public final class ImageView {
         public String label() {
             return label;
         }
+    }
+
+    /**
+     * Where the picture in front is, beyond fitting: how much larger than it fits, how far its centre is from the
+     * stage's, and how far it is turned. {@link #REST} is the picture fitted, centred and upright.
+     *
+     * @param zoom    its size over the size it fits at; above 0
+     * @param x       its centre's offset from the stage's, across, in layout px
+     * @param y       the same, down
+     * @param degrees clockwise, about its own centre
+     */
+    public record Pose(float zoom, float x, float y, float degrees) {
+
+        public static final Pose REST = new Pose(1f, 0f, 0f, 0f);
+
+        public Pose {
+            if (!(zoom > 0f)) {
+                throw new IllegalArgumentException("a picture is shown at some size: " + zoom);
+            }
+        }
+    }
+
+    /**
+     * The stage, and the size the picture in front fits at on it ({@link Pose#zoom} 1, upright), in layout px:
+     * whole and at its own aspect, and a raster no larger than its own pixels.
+     */
+    public record Fitted(float stageW, float stageH, float pictureW, float pictureH) {
     }
 
     /** GIF's degenerate delays (0 and 10 ms) mean "as fast as you like"; browsers show them at 100 ms, as does this. */
@@ -99,8 +135,14 @@ public final class ImageView {
     private final AtomicInteger transition = new AtomicInteger();
     private volatile NodeLayout stageBox = NodeLayout.ABSENT;
     private volatile Backdrop backdrop = Backdrop.DARK;
+    /** How the picture is scaled as it is drawn, from its texture: the GPU's filter. Guarded by this. */
+    private ImageFilter filter = ImageFilter.BILINEAR;
     /** Whether the backdrop is left to whatever is behind the view ({@link #bare}). */
     private volatile boolean bare;
+    /** The root em in layout px: what {@code Node.translate} counts in. Measured by a ruler on the stage. */
+    private volatile float emPx = 16f;
+    /** Told when the stage changes size, once the layers are fitted to it. */
+    private volatile Runnable onFit = () -> { };
 
     public ImageView(Gui gui, KronoGui krono, Textures textures, Length padY, Length padX) {
         this.gui = gui;
@@ -108,8 +150,10 @@ public final class ImageView {
         this.textures = textures;
         this.back = new Layer();
         this.front = new Layer();
+        // The em in px, which a pose's offset is drawn in (Node.translate): one em of nothing, measured.
+        Node ruler = gui.box().size(Length.rem(1f), Length.ZERO).floatAt(Length.ZERO, Length.ZERO).hitInert(true);
         this.stage = gui.column().width(Length.FILL).height(Length.FILL).clip(true).scroll(false, false)
-                .children(back.frame, front.frame);
+                .children(ruler, back.frame, front.frame);
         this.well = gui.column().width(Length.FILL).height(Length.grow(1f)).padding(padY, padX)
                 .scroll(false, false).children(stage);
         back.paint();
@@ -117,6 +161,16 @@ public final class ImageView {
         gui.onResize(stage, box -> {
             stageBox = box;
             fit();
+            onFit.run();
+        });
+        gui.onResize(ruler, box -> {
+            if (box.present() && box.rect().w() > 0f) {
+                emPx = box.rect().w();
+                synchronized (this) {
+                    front.draw();
+                    back.draw();
+                }
+            }
         });
     }
 
@@ -189,6 +243,25 @@ public final class ImageView {
     }
 
     /** Change what shows through a transparent pixel. Takes effect at once, picture or no picture. */
+    /**
+     * Scale the picture with {@code f} as it is drawn from its texture, every frame, moving or not: on the GPU, so
+     * the filters with a loop of taps cost a loop of taps. {@link ImageFilter#BILINEAR} by default. A {@link #detail}
+     * is made at the size it is shown and is drawn as it is.
+     */
+    public synchronized void filter(ImageFilter f) {
+        filter = f == null ? ImageFilter.BILINEAR : f;
+        for (Layer l : List.of(front, back)) {
+            Picture p = l.picture;
+            if (p != null) {
+                l.plate.imageFilter(filter, p.sheetWidth(), p.sheetHeight());
+            }
+        }
+    }
+
+    public synchronized ImageFilter filter() {
+        return filter;
+    }
+
     public void backdrop(Backdrop b) {
         backdrop = b == null ? Backdrop.DARK : b;
         synchronized (this) {
@@ -198,6 +271,72 @@ public final class ImageView {
             back.paint();
         }
         fit();
+    }
+
+    /**
+     * Put the picture in front at {@code pose}: larger or smaller than it fits, off centre, turned. Cheap enough to
+     * call every frame. A newly {@linkplain #show shown} picture starts at {@link Pose#REST}, and the one it replaces
+     * goes out at whatever pose it had. The view keeps no limits of its own: where a picture may go is the caller's.
+     */
+    public synchronized void pose(Pose pose) {
+        front.pose = pose == null ? Pose.REST : pose;
+        front.draw();
+    }
+
+    /**
+     * Draw the part of {@code of} from {@code (u0, v0)} to {@code (u1, v1)}, in fractions of its width and height, from
+     * {@code part} instead: the same pixels made sharper, at the size they are shown ({@code Original.detail}). It lies
+     * over the picture in the picture's own frame, so it moves, scales and turns with it, and goes with it. It replaces
+     * the part shown before, and is dropped if {@code of} is no longer the picture in front when its texture arrives.
+     * It is shown only while the picture is at {@code zoom}, the {@link Pose#zoom} it was made for: zoomed any other
+     * way it is no sharper than the picture under it, so the picture is shown plain until the next part comes. False
+     * if it will not be shown.
+     */
+    public boolean detail(Picture of, Picture part, float zoom, float u0, float v0, float u1, float v1) {
+        Layer layer;
+        int g;
+        synchronized (this) {
+            layer = front;
+            if (of == null || part == null || layer.picture != of) {
+                return false;
+            }
+            g = layer.generation.get();
+        }
+        return textures.upload(part, texture -> {
+            synchronized (this) {
+                if (layer.current(g) && layer.picture == of) {
+                    layer.sharpen(texture, zoom, u0, v0, u1, v1);
+                } else {
+                    textures.release(texture);
+                }
+            }
+        });
+    }
+
+    /** The pose of the picture in front. */
+    public synchronized Pose pose() {
+        return front.pose;
+    }
+
+    /** The stage and the size the picture in front fits at, or null with no picture or no stage yet. */
+    public synchronized Fitted fitted() {
+        Picture p = front.picture;
+        NodeLayout box = stageBox;
+        if (p == null || !box.present()) {
+            return null;
+        }
+        float cw = box.content().w();
+        float ch = box.content().h();
+        if (cw <= 0f || ch <= 0f) {
+            return null;
+        }
+        float[] f = fraction(p, cw, ch);
+        return new Fitted(cw, ch, f[0] * cw, f[1] * ch);
+    }
+
+    /** Run {@code r} whenever the stage changes size, once the layers have been fitted to it; on a layout thread. */
+    public void onFit(Runnable r) {
+        onFit = r == null ? () -> { } : r;
     }
 
     /** The incoming picture fades and slides in as the outgoing one fades and slides out, from where each is now. */
@@ -283,18 +422,30 @@ public final class ImageView {
         /** Where the transition has it: opacity, and offset across in root em. */
         volatile float alpha = 1f;
         volatile float dx;
+        /** Where the picture is beyond fitting; {@link Pose#REST} from every load. */
+        Pose pose = Pose.REST;
+        /** A part of the picture drawn sharper over the plate ({@link #detail}), and its texture, which this layer owns. */
+        final Node detail;
+        SampledImage sharp;
+        /** The zoom the part was made for: at any other it is no sharper than the plate, and is hidden. */
+        float sharpZoom = 1f;
 
         Layer() {
             Length corner = Length.rem(0.3f);
             this.plate = gui.box().width(Length.FILL).height(Length.FILL).corner(corner);
+            // Its corners are the plate's: where the part reaches the picture's corners they match, and its other
+            // edges lie past the stage, where nothing is seen.
+            this.detail = gui.box().size(Length.ZERO, Length.ZERO).corner(corner).floatAt(Length.ZERO, Length.ZERO)
+                    .hitInert(true).visible(false);
             this.frame = gui.column().size(Length.ZERO, Length.ZERO).corner(corner).scroll(false, false)
-                    .floatAt(Length.ZERO, Length.ZERO).hitInert(true).visible(false).children(plate);
+                    .floatAt(Length.ZERO, Length.ZERO).hitInert(true).visible(false).children(plate, detail);
         }
 
         /** Make this the layer for {@code p}, showing nothing until its texture comes. The generation to expect. */
         int load(Picture p) {
             clear();
             picture = p;
+            pose = Pose.REST;
             place(0f, 0f);
             frame.visible(true);
             return generation.get();
@@ -306,6 +457,7 @@ public final class ImageView {
 
         /** The texture for what was loaded at {@code g} has arrived: show it, and step it if it is animated. */
         void texture(int g, Picture p, SampledImage texture) {
+            plate.imageFilter(filter, p.sheetWidth(), p.sheetHeight());
             if (!p.animated()) {
                 plate.image(texture);
                 return;
@@ -328,7 +480,7 @@ public final class ImageView {
         void place(float alpha, float dx) {
             this.alpha = alpha;
             this.dx = dx;
-            frame.opacity(alpha).translate(dx, 0f);
+            draw();
         }
 
         /** Show nothing: stop the animation and stop naming the texture. */
@@ -342,8 +494,34 @@ public final class ImageView {
                 picture = null;
                 plate.image(null);
             }
+            sharpen(null, 1f, 0f, 0f, 0f, 0f);
             frame.visible(false);
             place(1f, 0f);
+        }
+
+        /**
+         * Lay {@code texture} over the part of the picture from {@code (u0, v0)} to {@code (u1, v1)}, or take the one
+         * there away for null, and give back the one it replaces.
+         */
+        void sharpen(SampledImage texture, float zoom, float u0, float v0, float u1, float v1) {
+            SampledImage old = sharp;
+            sharp = texture;
+            sharpZoom = zoom;
+            if (texture == null) {
+                detail.visible(false).image(null);
+            } else {
+                detail.floatAt(Length.percent(100f * u0), Length.percent(100f * v0))
+                        .size(Length.percent(100f * (u1 - u0)), Length.percent(100f * (v1 - v0)))
+                        .image(texture).visible(sharp());
+            }
+            if (old != null && old != texture) {
+                textures.release(old);
+            }
+        }
+
+        /** Whether the part is shown: there is one, and the picture is at the zoom it was made for. */
+        boolean sharp() {
+            return sharp != null && Math.abs(pose.zoom() - sharpZoom) <= 1e-3f * sharpZoom;
         }
 
         void paint() {
@@ -357,7 +535,10 @@ public final class ImageView {
             }
         }
 
-        /** Size the frame to the stage and centre it; redraw the checks if the size changed. */
+        /**
+         * Size the frame to the stage at its pose, place it, and turn it; redraw the checks if the size changed. In
+         * percent of the stage, so a resize keeps the picture where it was relative to the stage.
+         */
         void fit() {
             Picture p = picture;
             NodeLayout box = stageBox;
@@ -381,6 +562,17 @@ public final class ImageView {
                     frame.picture(checks(w, h).picture());
                 }
             }
+        }
+
+        /**
+         * Draw the frame where its pose and the transition put it: moved, scaled and turned about its centre, all
+         * visual transforms, so a pose changed every frame lays nothing out.
+         */
+        void draw() {
+            Pose at = pose;
+            float em = emPx;
+            frame.opacity(alpha).translate(dx + at.x() / em, at.y() / em).scale(at.zoom()).rotate(at.degrees());
+            detail.visible(sharp());
         }
     }
 }

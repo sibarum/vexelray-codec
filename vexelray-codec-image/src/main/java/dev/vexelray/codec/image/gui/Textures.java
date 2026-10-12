@@ -92,6 +92,41 @@ public final class Textures {
     }
 
     /**
+     * Upload {@code picture} as a texture of its own, outside the cache, and hand it to {@code then} on the GUI thread:
+     * for a picture shown once and replaced, like a detail, which would only push the folder's pictures out. The caller
+     * owns it and gives it back with {@link #release}. False if there is no window to upload into.
+     */
+    public boolean upload(Picture picture, Consumer<SampledImage> then) {
+        GuiApp window = app;
+        if (window == null) {
+            return false;
+        }
+        window.post(() -> {
+            if (app != window) {
+                return;
+            }
+            then.accept(window.texture(picture.sheet(), picture.sheetWidth(), picture.sheetHeight()));
+        });
+        return true;
+    }
+
+    /**
+     * Give back a texture from {@link #upload}, once no node names it: closed when no frame in flight still samples it.
+     * From any thread; nothing, if the window has gone, which closes what is left.
+     */
+    public void release(SampledImage texture) {
+        GuiApp window = app;
+        if (window == null || !(texture instanceof AtlasTexture t)) {
+            return;
+        }
+        window.post(() -> {
+            if (app == window) {
+                window.release(t);
+            }
+        });
+    }
+
+    /**
      * Run {@code then} on the GUI thread after every {@link #show} already asked for has handed over its texture, so a
      * change that must land in the same frame as some pictures (a strip of thumbnails starting to slide) does. At once
      * if there is no window, since nothing is coming.
