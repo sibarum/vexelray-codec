@@ -30,6 +30,8 @@ dev.vexelray.codec.image        pixels, and no GUI type. Blocking: run on Gui.of
   Picture                       every frame packed into one RGBA8 sheet, scaled down and never up.
   Original                      a still at its own full size, any part of which is made at any size: a raster
                                 resampled, a vector rasterised again. One at a time: a photograph's is large.
+  MaskField                     an SVG mask rasterised finely and made into a signed distance field by vexelray-canvas's
+                                DistanceField. One small texture is the shape at any size (Canvas.field).
   Resample                      any ImageFilter (vexelray-canvas), exact at any scale, in linear light, premultiplied.
   Stamp                         which version of a file: the key for anything cached from it.
   Lru                           a cache bounded by weight, least recently used out first.

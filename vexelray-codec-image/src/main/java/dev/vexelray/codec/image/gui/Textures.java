@@ -68,8 +68,25 @@ public final class Textures {
     /**
      * Hand {@code picture}'s texture to {@code then} on the GUI thread, uploading it if it is not already there.
      * False if there is no window to upload into, in which case {@code then} is never called.
+     *
+     * <p>A still is uploaded as a picture ({@code GuiApp.picture}): with its mip chain, and read in linear light, so
+     * drawn small it is averaged rather than skipped. An animation's sheet is not, since a level would blend one
+     * frame's edge into the next frame's.
      */
     public boolean show(Picture picture, Consumer<SampledImage> then) {
+        return show(picture, !picture.animated(), then);
+    }
+
+    /**
+     * Hand {@code picture}'s texture to {@code then} as {@link #show} does, but as data: its texels stored and read
+     * as they are, with no mip chain and no decoding. For a picture whose values are not colours, such as a
+     * {@code MaskField}.
+     */
+    public boolean showData(Picture picture, Consumer<SampledImage> then) {
+        return show(picture, false, then);
+    }
+
+    private boolean show(Picture picture, boolean asPicture, Consumer<SampledImage> then) {
         GuiApp window = app;
         if (window == null) {
             return false;
@@ -82,8 +99,11 @@ public final class Textures {
             Key key = Key.of(picture);
             Uploaded u = textures.get(key);
             if (u == null || u.texture().isClosed()) {
-                u = new Uploaded(window.texture(picture.sheet(), picture.sheetWidth(), picture.sheetHeight()),
-                        picture.bytes());
+                AtlasTexture t = asPicture
+                        ? window.picture(picture.sheet(), picture.sheetWidth(), picture.sheetHeight())
+                        : window.texture(picture.sheet(), picture.sheetWidth(), picture.sheetHeight());
+                // A chain is a third again of the image's own bytes.
+                u = new Uploaded(t, asPicture ? picture.bytes() * 4 / 3 : picture.bytes());
                 textures.put(key, u);
             }
             then.accept(u.texture());
