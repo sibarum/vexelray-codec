@@ -53,8 +53,9 @@ import java.util.concurrent.atomic.AtomicInteger;
  * so the checkerboard is the drawing of a layer's frame and the picture is the image of a plate that fills it.
  *
  * <p><b>Zoomed, moved and turned by its caller.</b> The picture in front can be given a {@link Pose}: a size relative
- * to the one it fits at, an offset from the centre, and a turn. It is drawn with the visual transforms
- * ({@code Node.translate}, {@code scale}, {@code rotate}) on the fitted frame, never by laying the frame out again: a
+ * to the one it fits at, an offset from the centre, a turn, and a mirror. It is drawn with the visual transforms
+ * ({@code Node.translate}, {@code scale}, {@code rotate}) on the fitted frame, and a mirror by reading the texture the
+ * other way ({@code ImageRegion} reversed), never by laying the frame out again: a
  * float is held inside its parent, and a pose that changes every frame should lay nothing out. The view only draws
  * the pose; the gestures that change it, and the limits on where the picture may go, are the caller's, which
  * {@link #fitted} gives the measures for. The stage clips, so a picture larger than it is cut at its edges.
@@ -85,14 +86,21 @@ public final class ImageView {
 
     /**
      * Where the picture in front is, beyond fitting: how much larger than it fits, how far its centre is from the
-     * stage's, and how far it is turned. {@link #REST} is the picture fitted, centred and upright.
+     * stage's, how far it is turned, and whether it is mirrored. {@link #REST} is the picture fitted, centred, upright
+     * and as it is.
+     *
+     * <p>A mirror is in the picture's own frame, before the turn: its left and right swapped ({@code mirrorX}), or its
+     * top and bottom ({@code mirrorY}), and then turned {@code degrees}. It is drawn by sampling the texture the other
+     * way, so it costs nothing and every filter reads it as it reads the picture.
      *
      * @param zoom    its size over the size it fits at; above 0
      * @param x       its centre's offset from the stage's, across, in layout px
      * @param y       the same, down
      * @param degrees clockwise, about its own centre
+     * @param mirrorX its left and right swapped
+     * @param mirrorY its top and bottom swapped
      */
-    public record Pose(float zoom, float x, float y, float degrees) {
+    public record Pose(float zoom, float x, float y, float degrees, boolean mirrorX, boolean mirrorY) {
 
         public static final Pose REST = new Pose(1f, 0f, 0f, 0f);
 
@@ -100,6 +108,11 @@ public final class ImageView {
             if (!(zoom > 0f)) {
                 throw new IllegalArgumentException("a picture is shown at some size: " + zoom);
             }
+        }
+
+        /** Not mirrored. */
+        public Pose(float zoom, float x, float y, float degrees) {
+            this(zoom, x, y, degrees, false, false);
         }
     }
 
@@ -321,7 +334,8 @@ public final class ImageView {
     /**
      * Draw the part of {@code of} from {@code (u0, v0)} to {@code (u1, v1)}, in fractions of its width and height, from
      * {@code part} instead: the same pixels made sharper, at the size they are shown ({@code Original.detail}). It lies
-     * over the picture in the picture's own frame, so it moves, scales and turns with it, and goes with it. It replaces
+     * over the picture in the picture's own frame, so it moves, scales, turns and mirrors with it, and goes with it;
+     * its fractions are of the picture as it is, not mirrored. It replaces
      * the part shown before, and is dropped if {@code of} is no longer the picture in front when its texture arrives.
      * It is shown only while the picture is at {@code zoom}, the {@link Pose#zoom} it was made for: zoomed any other
      * way it is no sharper than the picture under it, so the picture is shown plain until the next part comes. False
@@ -469,6 +483,17 @@ public final class ImageView {
         SampledImage sharp;
         /** The zoom the part was made for: at any other it is no sharper than the plate, and is hidden. */
         float sharpZoom = 1f;
+        /** Where the part lies, in fractions of the picture as it is, not mirrored. */
+        private float sharpU0;
+        private float sharpV0;
+        private float sharpU1;
+        private float sharpV1;
+        /** What the plate shows, as the picture is: the texture and the part of it (a sheet's cell, or the whole). */
+        private SampledImage onPlate;
+        private ImageRegion plateRegion = ImageRegion.WHOLE;
+        /** The mirror the plate and the part were last drawn with. */
+        private boolean drawnX;
+        private boolean drawnY;
 
         Layer() {
             Length corner = Length.rem(0.3f);
@@ -517,17 +542,19 @@ public final class ImageView {
             if (!p.animated()) {
                 return;
             }
-            plate.image(texture, ImageRegion.cell(0, p.columns(), p.rows()));
+            plate(texture, ImageRegion.cell(0, p.columns(), p.rows()));
             animation = krono.spork("image-animation", () -> {
                 int i = 0;
                 while (generation.get() == g) {
                     int d = p.delays()[i];
                     Time.advance(Dur.ms(d < FLOOR_MS ? DEGENERATE_MS : d));
-                    if (generation.get() != g) {
-                        return;
-                    }
                     i = (i + 1) % p.count();
-                    plate.image(texture, ImageRegion.cell(i, p.columns(), p.rows()));
+                    synchronized (ImageView.this) {
+                        if (generation.get() != g) {
+                            return;
+                        }
+                        plate(texture, ImageRegion.cell(i, p.columns(), p.rows()));
+                    }
                 }
             });
         }
@@ -537,7 +564,26 @@ public final class ImageView {
             textureW = w;
             textureH = h;
             plate.imageFilter(filter, w, h);
-            plate.image(texture);
+            plate(texture, ImageRegion.WHOLE);
+        }
+
+        /** Put {@code region} of {@code texture} on the plate, mirrored as the pose has it. */
+        void plate(SampledImage texture, ImageRegion region) {
+            onPlate = texture;
+            plateRegion = region;
+            drawnX = pose.mirrorX();
+            drawnY = pose.mirrorY();
+            plate.image(texture, mirrored(region));
+        }
+
+        /** {@code r} read the other way along each axis the pose mirrors. */
+        ImageRegion mirrored(ImageRegion r) {
+            Pose at = pose;
+            if (!at.mirrorX() && !at.mirrorY()) {
+                return r;
+            }
+            return new ImageRegion(at.mirrorX() ? r.u1() : r.u0(), at.mirrorY() ? r.v1() : r.v0(),
+                    at.mirrorX() ? r.u0() : r.u1(), at.mirrorY() ? r.v0() : r.v1());
         }
 
         /** Hold the picture's playing, or let it go: for a window that is not focused. */
@@ -568,6 +614,8 @@ public final class ImageView {
             textureH = 0;
             if (picture != null) {
                 picture = null;
+                onPlate = null;
+                plateRegion = ImageRegion.WHOLE;
                 plate.image(null);
             }
             sharpen(null, 1f, 0f, 0f, 0f, 0f);
@@ -583,16 +631,29 @@ public final class ImageView {
             SampledImage old = sharp;
             sharp = texture;
             sharpZoom = zoom;
+            sharpU0 = u0;
+            sharpV0 = v0;
+            sharpU1 = u1;
+            sharpV1 = v1;
             if (texture == null) {
                 detail.visible(false).image(null);
             } else {
-                detail.floatAt(Length.percent(100f * u0), Length.percent(100f * v0))
-                        .size(Length.percent(100f * (u1 - u0)), Length.percent(100f * (v1 - v0)))
-                        .image(texture).visible(sharp());
+                placeDetail();
+                detail.visible(sharp());
             }
             if (old != null && old != texture) {
                 textures.release(old);
             }
+        }
+
+        /** Lay the part where it lies on the picture as the pose mirrors it, and read it the same way. */
+        void placeDetail() {
+            Pose at = pose;
+            float u0 = at.mirrorX() ? 1f - sharpU1 : sharpU0;
+            float v0 = at.mirrorY() ? 1f - sharpV1 : sharpV0;
+            detail.floatAt(Length.percent(100f * u0), Length.percent(100f * v0))
+                    .size(Length.percent(100f * (sharpU1 - sharpU0)), Length.percent(100f * (sharpV1 - sharpV0)))
+                    .image(sharp, mirrored(ImageRegion.WHOLE));
         }
 
         /** Whether the part is shown: there is one, and the picture is at the zoom it was made for. */
@@ -642,12 +703,23 @@ public final class ImageView {
 
         /**
          * Draw the frame where its pose and the transition put it: moved, scaled and turned about its centre, all
-         * visual transforms, so a pose changed every frame lays nothing out.
+         * visual transforms, so a pose changed every frame lays nothing out. A mirror changed since the last draw
+         * reads the plate and the part the other way.
          */
         void draw() {
             Pose at = pose;
             float em = emPx;
             frame.opacity(alpha).translate(dx + at.x() / em, at.y() / em).scale(at.zoom()).rotate(at.degrees());
+            if (at.mirrorX() != drawnX || at.mirrorY() != drawnY) {
+                drawnX = at.mirrorX();
+                drawnY = at.mirrorY();
+                if (onPlate != null) {
+                    plate.image(onPlate, mirrored(plateRegion));
+                }
+                if (sharp != null) {
+                    placeDetail();
+                }
+            }
             detail.visible(sharp());
         }
     }
