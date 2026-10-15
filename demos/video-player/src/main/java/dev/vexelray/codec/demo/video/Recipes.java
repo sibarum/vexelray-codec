@@ -56,8 +56,8 @@ final class Recipes {
         gui.landmark("player.state", state);
         gui.landmark("player.stats", stats);
         gui.landmark("player.view", view.node());
-        Node bar = gui.row().width(Length.FILL).height(Length.AUTO).gap(Length.em(2))
-                .padding(Length.em(0.4f), Length.em(1)).background(gui.theme().color(Role.PANEL))
+        Node bar = gui.row().width(Length.FILL).height(Length.AUTO).gap(Length.rem(2))
+                .padding(Length.rem(0.4f), Length.rem(1)).background(gui.theme().color(Role.PANEL))
                 .children(state, stats);
         gui.root().direction(Direction.COLUMN).background(gui.theme().color(Role.PAGE))
                 .children(titleBar.node(), view.node(), bar);
