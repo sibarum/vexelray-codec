@@ -1,0 +1,71 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <parent>
+        <groupId>dev.vexelray.codec</groupId>
+        <artifactId>vexelray-codec</artifactId>
+        <version>0.1.1-SNAPSHOT</version>
+    </parent>
+
+    <artifactId>vexelray-codec-video</artifactId>
+    <packaging>jar</packaging>
+
+    <name>vexelray-codec-video</name>
+    <description>
+        Videos on a VexelRay GUI. ffmpeg-wrapper turns a file into frames of RGBA8; this opens a file at the size it
+        will be shown, decodes ahead of the clock on a thread of its own, and plays it on a node, each frame uploaded
+        as it falls due and the last one given back. A poster frame comes out as a Picture, so a folder of videos
+        shows the way a folder of pictures does.
+    </description>
+
+    <!--
+      Two packages, split where the GUI starts, as in vexelray-codec-image:
+
+        dev.vexelray.codec.video       frames and nothing else. No GUI type. Videos.open and Videos.poster block:
+                                       run them on Gui.offload(). A Reel decodes on its own thread.
+        dev.vexelray.codec.video.gui   VideoView, on the Textures that vexelray-codec-image's ImageStarter binds:
+                                       an application that shows videos names that starter, and no other.
+
+      Portable. The only native code is FFmpeg and the shim over it, and both are ffmpeg-wrapper's, which bundles
+      them per platform under natives/<os>-<arch>/ and loads the ones for the host. Nothing here names an OS.
+    -->
+    <dependencies>
+        <dependency>
+            <groupId>sibarum.ffmpeg</groupId>
+            <artifactId>ffmpeg-wrapper</artifactId>
+        </dependency>
+        <!-- Picture, Decoded, Stamp, and Textures: a frame is uploaded the way a picture is. -->
+        <dependency>
+            <groupId>dev.vexelray.codec</groupId>
+            <artifactId>vexelray-codec-image</artifactId>
+        </dependency>
+
+        <dependency>
+            <groupId>dev.vexelray.gui</groupId>
+            <artifactId>vexelray-gui-core</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>dev.vexelray.gui</groupId>
+            <artifactId>vexelray-gui-krono</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>dev.vexelray</groupId>
+            <artifactId>vexelray-canvas</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>dev.vexelray</groupId>
+            <artifactId>vexelray-vulkan</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>sibarum.kronometer</groupId>
+            <artifactId>kronometer-core</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>sibarum.atchung</groupId>
+            <artifactId>atchung-probe</artifactId>
+        </dependency>
+    </dependencies>
+</project>

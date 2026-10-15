@@ -21,6 +21,10 @@
              the file is), packed into one sheet per picture, uploaded once, and shown on a node. No platform
              code of its own: the decoder's natives are imagelib-wrapper's, which bundles them per platform. -->
         <module>vexelray-codec-image</module>
+        <!-- Videos: any file ffmpeg-wrapper decodes (H.264, HEVC, VP9, AV1 and the rest, in MP4, MKV, WebM, MOV and the
+             rest), decoded ahead of the clock and played on a node, a frame uploaded as each falls due; and a poster
+             frame as a Picture. Its natives are ffmpeg-wrapper's, bundled per platform. Video only: no sound yet. -->
+        <module>vexelray-codec-video</module>
     </modules>
 
     <!--
@@ -42,6 +46,7 @@
         <atchung.version>1.1-SNAPSHOT</atchung.version>
         <kronometer.version>1.1-SNAPSHOT</kronometer.version>
         <imagelib.version>0.1.1-SNAPSHOT</imagelib.version>
+        <ffmpeg.version>0.1.0-SNAPSHOT</ffmpeg.version>
 
         <junit.version>5.11.4</junit.version>
     </properties>
@@ -54,12 +59,22 @@
                 <artifactId>vexelray-codec-image</artifactId>
                 <version>${project.version}</version>
             </dependency>
+            <dependency>
+                <groupId>dev.vexelray.codec</groupId>
+                <artifactId>vexelray-codec-video</artifactId>
+                <version>${project.version}</version>
+            </dependency>
 
             <!-- The decoders. Each wrapper owns its natives; a codec module here never loads a library itself. -->
             <dependency>
                 <groupId>sibarum.imagelib</groupId>
                 <artifactId>imagelib-wrapper</artifactId>
                 <version>${imagelib.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>sibarum.ffmpeg</groupId>
+                <artifactId>ffmpeg-wrapper</artifactId>
+                <version>${ffmpeg.version}</version>
             </dependency>
 
             <!-- The GUI a picture is placed on: Gui, Node, GuiApp.texture, ImageRegion. -->
