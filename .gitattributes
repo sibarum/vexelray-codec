@@ -1,2 +1,5 @@
 # Auto detect text files and perform LF normalization
 * text=auto
+
+# Asset files are binary whatever their bytes look like: a line ending rewritten is a file corrupted.
+*.vxa binary

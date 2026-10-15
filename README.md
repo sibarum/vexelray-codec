@@ -23,6 +23,8 @@ vexelray-codec-video     videos, through ffmpeg-wrapper: H.264, HEVC, VP9, AV1 a
                          and the rest; played on a node, a frame uploaded as each falls due. Video only, no sound yet.
 vexelray-codec-mesh      meshes, in plain Java: OBJ, PLY (ASCII and binary), STL (ASCII and binary) and OFF, read
                          into one Mesh. Geometry only: no GUI type yet.
+vexelray-codec-asset     the stack's own asset file, .vxa: meshes, point clouds, volumes, 2D and 3D textures,
+                         distance fields, compiled shadelet compositions and looks, in one intrabuf payload.
 ```
 
 ### vexelray-codec-image
@@ -168,9 +170,67 @@ them. The one change is STL's: it has no shared vertices, so corners that are th
 Not yet: OBJ groups, objects and materials (read past), PLY list properties other than faces' indices and
 `texcoord`, glTF, and a GUI half that draws a `Mesh` through `vexelray-technique-mesh`.
 
+### vexelray-codec-asset
+
+```
+dev.vexelray.codec.asset        the asset file, and no GUI type. Blocking: run on Gui.offload().
+  Assets                        an Asset written to a file (whole or not at all) or bytes, and read back from a file,
+                                bytes in hand or a resource, binary or text. A failure is a reason, never an exception.
+  Unpacked                      what Assets.read returns: what the file is, and its Asset, or why not.
+  Asset                         the file's root: a name, properties, and a list of each kind of item below.
+  MeshData                      a Mesh (vexelray-codec-mesh): indices, and the data on vertices, corners, faces, edges.
+  PointCloud                    points and the channels on them.
+  Volume                        a regular 3D grid placed in space, and its channels: densities, a signed distance.
+  Texture                       2D or 3D, a named texel format, level 0 and any mips.
+  DistanceField                 a canvas distance field, one channel kept of the four the GPU gets (or three, or four,
+                                for MSDF and MTSDF), packed.
+  Shader                        a compiled shadelet composition: SPIR-V per host and stage (ShaderStage), and its
+                                manifest (ShadeletInfo, StyleField), against which a look is checked.
+  Look                          how an item is drawn: a source, modifiers and painters (ShadeletUse), with their floats.
+  Channel                       a named array of numbers of a named type, n to an element.
+  Packed                        every array's bytes: raw, deflated, or regrouped by byte and deflated.
+```
+
+```java
+Asset asset = Asset.builder("ship")
+        .property("units", "metres")
+        .mesh(MeshData.of("hull", Meshes.of(Path.of("hull.ply")).mesh()))
+        .field(DistanceField.ofRgba("badge", field.rgba(), field.inner(), field.spread()))
+        .build();
+Assets.write(asset, Path.of("ship.vxa"));
+
+Unpacked u = Assets.read(Path.of("ship.vxa"));
+if (u.readable()) {
+    Mesh hull = u.asset().meshes().getFirst().toMesh();
+}
+```
+
+**On disk**, a file is eight bytes of signature (`89 56 58 41 0D 0A 1A 0A`: `VXA` between the bytes that catch a
+7-bit channel and a line-ending rewrite, as PNG's do) and one intrabuf payload of `Asset`. `Assets.toText` writes the
+same asset in intrabuf's text format, for reading and diffing, and `Assets.read` takes either.
+
+**Files outlive the build that wrote them, both ways.** Every schema is intrabuf FULL, so a newer reader opens an older
+file (the fields it predates empty) and an older reader opens a newer one (skipping fields it does not know, nested
+ones by length). That holds only while schemas grow at the end: a new field or a new kind of item goes last, with
+`@Field(since = n)` and the minor bumped, and nothing is removed, reordered or retyped. The module builds release
+payloads even at a snapshot version (`-Aintrabuf.snapshot=false`), since a snapshot payload is refused by any build
+whose schema differs, which is right for messages and wrong for files. `CompatibilityTest` holds both directions: a
+later schema stood in for by `FutureAsset`, and `golden/sampler-1.0.vxa`, the first version's file, which is never
+rewritten.
+
+**Vocabularies are names, not enums**: a `Packed` codec, a `Channel` type, a `Texture` format, a `DistanceField` kind.
+An enum ordinal a reader does not know fails the whole decode; a name it does not know fails one item, whose `known()`
+says so, and the rest of the file reads.
+
+**Packing.** `Packed.of` keeps whichever is smallest of the raw bytes, their deflate, and (for 2-, 4- or 8-byte
+elements) their bytes regrouped by position and then deflated, which compresses floats far better than deflate alone.
+
+Not yet: streaming (a file is read whole, so 2 GB at most), sparse volumes, cube-map and array textures, materials and
+scenes, and vastir source for shadelets (only compiled compositions and looks).
+
 ## Platforms
 
-Every module here is portable Java, and the mesh module has no native code at all. Native code belongs to the wrappers: `imagelib-wrapper` and `ffmpeg-wrapper` each
+Every module here is portable Java, and the mesh and asset modules have no native code at all. Native code belongs to the wrappers: `imagelib-wrapper` and `ffmpeg-wrapper` each
 bundle their libraries per platform under `natives/<os>-<arch>/` and load the host's. `ffmpeg-wrapper` has Windows
 built, Linux scripted and macOS not yet. If a codec ever needs something per OS that its wrapper
 cannot carry, it goes in a `vexelray-codec-<kind>-<os>` module per OS (Windows, Linux and macOS from day one, the

@@ -29,6 +29,10 @@
              the file says it. Plain Java, no wrapper: these formats are text and flat records. Geometry only, no
              GUI type yet. -->
         <module>vexelray-codec-mesh</module>
+        <!-- The stack's own asset file, .vxa: meshes, point clouds, volumes, textures, distance fields, compiled
+             shadelet compositions and looks, in one intrabuf payload whose schema only ever grows (FULL), so a reader
+             of any version opens a file of any other and skips what it does not know. -->
+        <module>vexelray-codec-asset</module>
     </modules>
 
     <!--
@@ -51,6 +55,7 @@
         <kronometer.version>1.1-SNAPSHOT</kronometer.version>
         <imagelib.version>0.1.1-SNAPSHOT</imagelib.version>
         <ffmpeg.version>0.1.0-SNAPSHOT</ffmpeg.version>
+        <intrabuf.version>0.1.1-SNAPSHOT</intrabuf.version>
 
         <junit.version>5.11.4</junit.version>
     </properties>
@@ -72,6 +77,18 @@
                 <groupId>dev.vexelray.codec</groupId>
                 <artifactId>vexelray-codec-mesh</artifactId>
                 <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>dev.vexelray.codec</groupId>
+                <artifactId>vexelray-codec-asset</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+
+            <!-- The asset file's encoding. The runtime only: the processor goes on the processor path. -->
+            <dependency>
+                <groupId>sibarum.intrabuf</groupId>
+                <artifactId>intrabuf-runtime</artifactId>
+                <version>${intrabuf.version}</version>
             </dependency>
 
             <!-- The decoders. Each wrapper owns its natives; a codec module here never loads a library itself. -->

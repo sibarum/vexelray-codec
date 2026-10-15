@@ -1,0 +1,70 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <parent>
+        <groupId>dev.vexelray.codec</groupId>
+        <artifactId>vexelray-codec</artifactId>
+        <version>0.1.1-SNAPSHOT</version>
+    </parent>
+
+    <artifactId>vexelray-codec-asset</artifactId>
+    <packaging>jar</packaging>
+
+    <name>vexelray-codec-asset</name>
+    <description>
+        The stack's own asset file, .vxa: meshes, point clouds, volumes, 2D and 3D textures, distance fields, compiled
+        shadelet compositions and looks, in one file. Encoded with intrabuf, every schema FULL: a newer reader opens an
+        older file, and an older reader a newer one, skipping what it does not know.
+    </description>
+
+    <!--
+      One package, and no GUI type in it:
+
+        dev.vexelray.codec.asset      the file's records and the front door, Assets. Blocking, run on Gui.offload().
+
+      Plain Java over intrabuf-runtime, which has no dependencies; vexelray-codec-mesh only for Mesh, which has none
+      either. Distance fields and shadelets are held as data (texels, SPIR-V words, layouts and floats), not as
+      vexelray-canvas types, so reading an asset file pulls in no renderer.
+    -->
+    <dependencies>
+        <dependency>
+            <groupId>sibarum.intrabuf</groupId>
+            <artifactId>intrabuf-runtime</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>dev.vexelray.codec</groupId>
+            <artifactId>vexelray-codec-mesh</artifactId>
+        </dependency>
+    </dependencies>
+
+    <build>
+        <plugins>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-compiler-plugin</artifactId>
+                <configuration>
+                    <annotationProcessorPaths>
+                        <path>
+                            <groupId>sibarum.intrabuf</groupId>
+                            <artifactId>intrabuf-processor</artifactId>
+                            <version>${intrabuf.version}</version>
+                        </path>
+                    </annotationProcessorPaths>
+                    <compilerArgs combine.children="append">
+                        <arg>-Aintrabuf.buildVersion=${project.version}</arg>
+                        <!-- Release payloads whatever the project version. A snapshot payload is refused by any build
+                             whose schema differs from its writer's, which suits a message between two builds of one
+                             program and not a file that outlives the build that wrote it. So the schemas here are
+                             evolved as released ones always: fields added at the end, @Field(since) and minor bumped,
+                             and FileTest holds a file written by an earlier version to still opening. -->
+                        <arg>-Aintrabuf.snapshot=false</arg>
+                        <arg>-Aintrabuf.module=${project.artifactId}</arg>
+                    </compilerArgs>
+                </configuration>
+            </plugin>
+        </plugins>
+    </build>
+</project>
