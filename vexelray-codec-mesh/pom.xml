@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <parent>
+        <groupId>dev.vexelray.codec</groupId>
+        <artifactId>vexelray-codec</artifactId>
+        <version>0.1.1-SNAPSHOT</version>
+    </parent>
+
+    <artifactId>vexelray-codec-mesh</artifactId>
+    <packaging>jar</packaging>
+
+    <name>vexelray-codec-mesh</name>
+    <description>
+        3D geometry from asset files, under one API whatever the format: vertices, edges, faces, and the data each
+        file keeps on them, read as the file says it and nothing invented. OBJ, PLY, STL and OFF to start.
+    </description>
+
+    <!--
+      One package for now, and no GUI type in it:
+
+        dev.vexelray.codec.mesh       geometry and nothing else. Blocking, run on Gui.offload().
+
+      No wrapper and no native code: these formats are text or flat binary records, read here in plain Java. A format
+      that needs a real decoder (FBX, compressed glTF) would get a wrapper of its own, as pictures and videos have.
+    -->
+</project>

@@ -25,6 +25,10 @@
              rest), decoded ahead of the clock and played on a node, a frame uploaded as each falls due; and a poster
              frame as a Picture. Its natives are ffmpeg-wrapper's, bundled per platform. Video only: no sound yet. -->
         <module>vexelray-codec-video</module>
+        <!-- Meshes: OBJ, PLY, STL and OFF read into one Mesh, its vertices, faces, edges and the data on each, as
+             the file says it. Plain Java, no wrapper: these formats are text and flat records. Geometry only, no
+             GUI type yet. -->
+        <module>vexelray-codec-mesh</module>
     </modules>
 
     <!--
@@ -62,6 +66,11 @@
             <dependency>
                 <groupId>dev.vexelray.codec</groupId>
                 <artifactId>vexelray-codec-video</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>dev.vexelray.codec</groupId>
+                <artifactId>vexelray-codec-mesh</artifactId>
                 <version>${project.version}</version>
             </dependency>
 

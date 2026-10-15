@@ -21,6 +21,8 @@ vexelray-codec-image     pictures, through imagelib-wrapper: PNG, JPEG, GIF, Web
                          SVG; animated where the file is.
 vexelray-codec-video     videos, through ffmpeg-wrapper: H.264, HEVC, VP9, AV1 and the rest, in MP4, MKV, WebM, MOV
                          and the rest; played on a node, a frame uploaded as each falls due. Video only, no sound yet.
+vexelray-codec-mesh      meshes, in plain Java: OBJ, PLY (ASCII and binary), STL (ASCII and binary) and OFF, read
+                         into one Mesh. Geometry only: no GUI type yet.
 ```
 
 ### vexelray-codec-image
@@ -127,9 +129,48 @@ Not yet: **sound** (the stack has no audio output, and the wrapper only reports 
 matrix's **rotation** (phone video shot upright plays on its side), and a **native image** (FFmpeg is shared libraries,
 so they would ship beside the executable). See `ffmpeg-wrapper`'s README.
 
+### vexelray-codec-mesh
+
+```
+dev.vexelray.codec.mesh         geometry, and no GUI type. Blocking: run on Gui.offload().
+  Meshes                        a file, a class-path resource or bytes in hand, its format told from the bytes. A
+                                failure is a reason, never an exception: "malformed OBJ: line 12: ...".
+  Loaded                        what Meshes returns: what the source is, and its Mesh, or why not.
+  Mesh                          vertices, faces and edges, indexed, as the file has them: polygons of any size, not
+                                triangulated, welded or reordered. edges() are the ones the file lists; wireframe()
+                                is every distinct edge, faces' sides included, once.
+  Attribute                     data on the mesh: a name, a scope, and a fixed number of floats each. Position,
+                                normal, uv and color by those names whatever the format calls them; anything else
+                                (a PLY property "confidence") by the file's own name.
+```
+
+```java
+Loaded l = Meshes.of(Path.of("bunny.ply"));
+if (l.geometry()) {
+    Mesh m = l.mesh();
+    float[] xyz = m.positions();                       // three a vertex
+    for (int f = 0; f < m.faceCount(); f++) {
+        int[] corners = m.face(f);                     // in order around the face
+    }
+    Attribute normal = m.attribute(Attribute.NORMAL);  // per vertex, or per corner where a vertex has several
+}
+```
+
+**An attribute has a scope.** `VERTEX`, `CORNER`, `FACE` or `EDGE`: one value per vertex, per face corner (in
+`Mesh.corners()` order), per face or per listed edge. OBJ indexes uvs and normals apart from positions, so a seam gives
+one vertex two uvs; those land on the corners and the vertex stays one vertex, its edges still shared. Where every face
+agrees, they are on the vertex. A colour is in `[0,1]` whatever the file stored; a value the file did not give is
+`NaN`.
+
+**As the file says it.** No units, axes or handedness are assumed or converted, since none of these formats records
+them. The one change is STL's: it has no shared vertices, so corners that are the same point bit for bit are made one.
+
+Not yet: OBJ groups, objects and materials (read past), PLY list properties other than faces' indices and
+`texcoord`, glTF, and a GUI half that draws a `Mesh` through `vexelray-technique-mesh`.
+
 ## Platforms
 
-Every module here is portable Java. Native code belongs to the wrappers: `imagelib-wrapper` and `ffmpeg-wrapper` each
+Every module here is portable Java, and the mesh module has no native code at all. Native code belongs to the wrappers: `imagelib-wrapper` and `ffmpeg-wrapper` each
 bundle their libraries per platform under `natives/<os>-<arch>/` and load the host's. `ffmpeg-wrapper` has Windows
 built, Linux scripted and macOS not yet. If a codec ever needs something per OS that its wrapper
 cannot carry, it goes in a `vexelray-codec-<kind>-<os>` module per OS (Windows, Linux and macOS from day one, the
