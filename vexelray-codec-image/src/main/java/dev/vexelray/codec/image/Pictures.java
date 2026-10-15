@@ -1,6 +1,8 @@
 package dev.vexelray.codec.image;
 
+import sibarum.imagelib.Animation;
 import sibarum.imagelib.Frames;
+import sibarum.imagelib.ImageException;
 import sibarum.imagelib.Imagelib;
 import sibarum.probe.Log;
 
@@ -41,6 +43,12 @@ public final class Pictures {
 
     /** The largest image file decoded. Past it the file is refused; its pixels would not fit anyway. */
     public static final long MAX_IMAGE = 128L * 1024 * 1024;
+
+    /**
+     * The largest file that may play. Its size is its compressed frames, not its pixels, and a {@link Movie} makes those
+     * one at a time from it, so it may be far larger than a still.
+     */
+    public static final long MAX_MOVIE = 1024L * 1024 * 1024;
 
     /**
      * What a folder is listed for: the extensions of what imagelib decodes, as its Cargo features name them. A guess
@@ -104,7 +112,7 @@ public final class Pictures {
         if (kind == Imagelib.Kind.UNKNOWN) {
             return Decoded.none(path, "not an image");
         }
-        if (size > MAX_IMAGE) {
+        if (size > (mayPlay(sample) ? MAX_MOVIE : MAX_IMAGE)) {
             return Decoded.none(path, "too large to show");
         }
         byte[] bytes;
@@ -118,7 +126,7 @@ public final class Pictures {
             LOG.warn("{} is too large to read", path);
             return Decoded.none(path, "too large to decode");
         }
-        return decode(path, stamp, bytes, kind, sides);
+        return decode(path, stamp, bytes, kind, sides, true);
     }
 
     /**
@@ -133,7 +141,7 @@ public final class Pictures {
         if (kind == Imagelib.Kind.UNKNOWN) {
             return Decoded.none(name, "not an image");
         }
-        return decode(name, name, bytes, kind, sides);
+        return decode(name, name, bytes, kind, sides, false);
     }
 
     /**
@@ -165,7 +173,13 @@ public final class Pictures {
         }
     }
 
-    private static Decoded decode(Object source, Object key, byte[] bytes, Imagelib.Kind kind, int[] sides) {
+    /**
+     * With {@code plays}, a raster that animates comes back as its first frame and a {@link Motion}, for a
+     * {@link Movie} to play from the file; without, every frame is packed into the sheet, which is what bytes in hand
+     * and resources get, having no file to play from.
+     */
+    private static Decoded decode(Object source, Object key, byte[] bytes, Imagelib.Kind kind, int[] sides,
+                                  boolean plays) {
         try {
             List<Picture> pictures = new ArrayList<>(Math.max(1, sides.length));
             String what;
@@ -181,6 +195,9 @@ public final class Pictures {
                     pictures.add(Picture.of(key, frames, w, h, true, s));
                 }
                 what = "SVG image";
+            } else if (plays && key instanceof Stamp stamp && mayPlay(bytes)) {
+                pictures.addAll(poster(stamp, bytes, sides));
+                what = identify(bytes);
             } else {
                 Frames frames = Imagelib.decode(bytes);
                 for (int s : sides(sides)) {
@@ -226,7 +243,10 @@ public final class Pictures {
     static String describe(String what, Picture p) {
         StringBuilder s = new StringBuilder(what).append(" · ").append(p.sourceWidth()).append(" × ")
                 .append(p.sourceHeight());
-        if (p.animated()) {
+        if (p.plays()) {
+            s.append(" · ").append(p.motion().frames()).append(" frames");
+            s.append(String.format(Locale.ROOT, ", %.1f s", p.motion().durationMillis() / 1000d));
+        } else if (p.animated()) {
             long ms = 0;
             for (int d : p.delays()) {
                 ms += d;
@@ -237,6 +257,34 @@ public final class Pictures {
             }
         }
         return s.toString();
+    }
+
+    /**
+     * The first frame of a file that may play, at each of {@code sides}, carrying its {@link Motion} if it does: one
+     * frame decoded, however many there are. A file that turns out to be still is that one frame, as decode gives it.
+     */
+    private static List<Picture> poster(Stamp stamp, byte[] bytes, int[] sides) {
+        List<Picture> pictures = new ArrayList<>();
+        try (Animation a = Imagelib.animate(bytes)) {
+            if (!a.next()) {
+                throw new ImageException("the file has no frames");
+            }
+            Motion motion = a.animated() ? Movie.motion(stamp, a) : null;
+            for (int s : sides(sides)) {
+                int[] size = Movie.fitted(a.width(), a.height(), s);
+                byte[] frame = Picture.fit(a.pixels(), a.width(), a.height(), size[0], size[1]);
+                pictures.add(new Picture(stamp, frame, size[0], size[1], 1, 1, new int[1], a.width(), a.height(),
+                        false, motion));
+            }
+        }
+        return pictures;
+    }
+
+    /** Whether the first bytes are of a format that can animate: GIF, WebP or PNG. */
+    static boolean mayPlay(byte[] b) {
+        return starts(b, 0x89, 'P', 'N', 'G') || starts(b, 'G', 'I', 'F', '8')
+                || starts(b, 'R', 'I', 'F', 'F') && b.length >= 12 && b[8] == 'W' && b[9] == 'E' && b[10] == 'B'
+                && b[11] == 'P';
     }
 
     /** What the first bytes say the image is. Small on purpose: a signature table is a promise to keep it right. */

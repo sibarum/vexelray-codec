@@ -5,6 +5,7 @@ import dev.vexelray.codec.image.Picture;
 import dev.vexelray.gui.core.app.GuiApp;
 import dev.vexelray.vulkan.present.AtlasTexture;
 import dev.vexelray.vulkan.present.SampledImage;
+import dev.vexelray.vulkan.present.StreamTexture;
 
 import java.util.function.Consumer;
 
@@ -27,6 +28,9 @@ public final class Textures {
 
     /** GPU memory for recent pictures, by default. A 1024 px still is 4 MB, so this keeps a folder's worth. */
     public static final long BUDGET = 192L * 1024 * 1024;
+
+    /** Slots in a picture that plays: one shown, one landing, one being written. */
+    static final int SLOTS = 3;
 
     private final long budget;
     private volatile GuiApp app;
@@ -142,6 +146,67 @@ public final class Textures {
         window.post(() -> {
             if (app == window) {
                 window.release(t);
+            }
+        });
+    }
+
+    /**
+     * Make a stream of {@code width x height} pictures ({@code GuiApp.stream}), with a mip chain per frame, and hand it
+     * to {@code then} on the GUI thread: what a picture that plays is shown through. Outside the cache; the caller owns
+     * it and gives it back with {@link #release(StreamTexture)}. False if there is no window to make it in.
+     */
+    public boolean stream(int width, int height, Consumer<StreamTexture> then) {
+        GuiApp window = app;
+        if (window == null) {
+            return false;
+        }
+        window.post(() -> {
+            if (app == window) {
+                then.accept(window.stream(width, height, SLOTS, true));
+            }
+        });
+        return true;
+    }
+
+    /**
+     * Copy {@code chain}, one frame's mip chain, into a free slot of {@code stream} and hand the slot to {@code then} on
+     * the GUI thread, which points a node at it; the slot shown before is then free again. {@code then} is given null
+     * if every slot is still in use, and the frame is not shown. False if there is no window.
+     */
+    public boolean present(StreamTexture stream, byte[][] chain, Consumer<SampledImage> then) {
+        GuiApp window = app;
+        if (window == null) {
+            return false;
+        }
+        window.post(() -> {
+            if (app != window || stream.isClosed()) {
+                return;
+            }
+            StreamTexture.Slot slot = stream.take();
+            if (slot == null) {
+                then.accept(null);
+                return;
+            }
+            slot.write(chain);
+            stream.submit(slot);
+            then.accept(slot);
+            stream.show(slot);
+        });
+        return true;
+    }
+
+    /**
+     * Give back a stream from {@link #stream}, once no node names any of its slots: closed when no frame in flight
+     * still samples one. From any thread; nothing, if the window has gone, which closes what is left.
+     */
+    public void release(StreamTexture stream) {
+        GuiApp window = app;
+        if (window == null || stream == null) {
+            return;
+        }
+        window.post(() -> {
+            if (app == window) {
+                window.release(stream);
             }
         });
     }

@@ -2,6 +2,8 @@ package dev.vexelray.codec.image;
 
 import sibarum.imagelib.Frames;
 
+import java.lang.foreign.MemorySegment;
+import java.lang.foreign.ValueLayout;
 import java.util.Arrays;
 
 /**
@@ -30,9 +32,11 @@ import java.util.Arrays;
  * @param sourceWidth  the size the file says it is: for display, and for saying so in a header
  * @param sourceHeight the same, down
  * @param vector       whether this was rasterised from a document with no pixel size of its own
+ * @param motion       when this is the first frame of a file that plays, what the file says about its playing; a
+ *                     {@link Movie} plays it. Null for a still, and for an animation packed whole into the sheet
  */
 public record Picture(Object key, byte[] sheet, int frameWidth, int frameHeight, int columns, int rows,
-                      int[] delays, int sourceWidth, int sourceHeight, boolean vector) {
+                      int[] delays, int sourceWidth, int sourceHeight, boolean vector, Motion motion) {
 
     /** The longest side of a sheet. Every Vulkan device samples at least 4096. */
     public static final int SHEET_SIDE = 4096;
@@ -40,13 +44,30 @@ public record Picture(Object key, byte[] sheet, int frameWidth, int frameHeight,
     /** Frames past this are thinned evenly, their time folded into the frames kept, so the loop keeps its length. */
     public static final int MAX_FRAMES = 128;
 
-    /** How many frames. 1 for a still. */
+    /** A picture that does not play: a still, or every frame packed into the sheet. */
+    public Picture(Object key, byte[] sheet, int frameWidth, int frameHeight, int columns, int rows, int[] delays,
+                   int sourceWidth, int sourceHeight, boolean vector) {
+        this(key, sheet, frameWidth, frameHeight, columns, rows, delays, sourceWidth, sourceHeight, vector, null);
+    }
+
+    /** How many frames in the sheet. 1 for a still, and for the poster of a file that {@linkplain #plays plays}. */
     public int count() {
         return delays.length;
     }
 
+    /** Whether the sheet holds more than one frame, stepped through a cell at a time. */
     public boolean animated() {
         return delays.length > 1;
+    }
+
+    /** Whether this is the first frame of a file a {@link Movie} plays: {@link #motion} says how. */
+    public boolean plays() {
+        return motion != null;
+    }
+
+    /** Whether this moves at all, one way or the other: a part made sharper from the file's own pixels would not. */
+    public boolean moves() {
+        return animated() || plays();
     }
 
     public int sheetWidth() {
@@ -102,6 +123,31 @@ public record Picture(Object key, byte[] sheet, int frameWidth, int frameHeight,
             keep[k] = (int) ((long) k * count / n);
         }
         return keep;
+    }
+
+    /**
+     * A {@code w x h} image in native memory as an {@code fw x fh} one, box-filtered as {@link #fit(byte[], int, int,
+     * byte[], int, int, int, int, int) fit} does: for a frame read where its decoder left it. The rows each output row
+     * covers are copied out together, so a canvas of any size is read once and never whole.
+     */
+    static byte[] fit(MemorySegment src, int w, int h, int fw, int fh) {
+        long rowBytes = (long) w * 4;
+        if (fw == w && fh == h) {
+            return src.asSlice(0, rowBytes * h).toArray(ValueLayout.JAVA_BYTE);
+        }
+        byte[] dst = new byte[fw * fh * 4];
+        byte[] band = new byte[0];
+        for (int dy = 0; dy < fh; dy++) {
+            int sy0 = (int) ((long) dy * h / fh);
+            int sy1 = Math.max(sy0 + 1, (int) ((long) (dy + 1) * h / fh));
+            int bandBytes = (int) (rowBytes * (sy1 - sy0));
+            if (band.length < bandBytes) {
+                band = new byte[bandBytes];
+            }
+            MemorySegment.copy(src, ValueLayout.JAVA_BYTE, rowBytes * sy0, band, 0, bandBytes);
+            fit(band, w, sy1 - sy0, dst, fw, 0, dy, fw, 1);
+        }
+        return dst;
     }
 
     /**

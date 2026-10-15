@@ -6,6 +6,7 @@ import dev.vexelray.canvas.ImageFilter;
 import dev.vexelray.gui.core.Gui;
 import dev.vexelray.gui.core.ImageRegion;
 import dev.vexelray.gui.core.Node;
+import dev.vexelray.gui.core.input.InputTopics;
 import dev.vexelray.gui.core.layout.Length;
 import dev.vexelray.gui.core.layout.NodeLayout;
 import dev.vexelray.gui.core.style.Role;
@@ -17,6 +18,7 @@ import dev.vexelray.vulkan.present.SampledImage;
 import sibarum.kronometer.Dur;
 import sibarum.kronometer.Time;
 import sibarum.kronometer.anim.Ease;
+import sibarum.tactroller.api.InputEvent;
 
 import java.util.List;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -143,6 +145,10 @@ public final class ImageView {
     private volatile float emPx = 16f;
     /** Told when the stage changes size, once the layers are fitted to it. */
     private volatile Runnable onFit = () -> { };
+    /** Told when the picture in front starts or stops playing, or its playing moves ({@link #onPlayback}). */
+    private volatile Runnable onPlayback = () -> { };
+    /** Whether the window is focused: pictures that play are held while it is not. */
+    private volatile boolean focused = true;
 
     public ImageView(Gui gui, KronoGui krono, Textures textures, Length padY, Length padX) {
         this.gui = gui;
@@ -169,6 +175,16 @@ public final class ImageView {
                 synchronized (this) {
                     front.draw();
                     back.draw();
+                }
+            }
+        });
+        // A picture that plays is held while its window is not focused, minimised included, and plays on when it is.
+        gui.bus().subscribe(InputTopics.INPUT, e -> {
+            if (e instanceof InputEvent.FocusChanged f) {
+                focused = f.focused();
+                synchronized (this) {
+                    front.hold(!focused);
+                    back.hold(!focused);
                 }
             }
         });
@@ -203,7 +219,7 @@ public final class ImageView {
         int g = incoming.load(p);
         fit();
         int dir = Integer.signum(direction);
-        return textures.show(p, texture -> {
+        boolean shown = textures.show(p, texture -> {
             synchronized (this) {
                 if (!incoming.current(g)) {
                     return;
@@ -217,6 +233,8 @@ public final class ImageView {
                 slide(incoming, outgoing, dir);
             }
         });
+        onPlayback.run();
+        return shown;
     }
 
     /** Show nothing: stop every animation and let go of every texture, so the cache may give them back. */
@@ -224,6 +242,24 @@ public final class ImageView {
         transition.incrementAndGet();
         front.clear();
         back.clear();
+        onPlayback.run();
+    }
+
+    /**
+     * How the picture in front plays, if it is the first frame of a file that does ({@link Picture#plays}): play, pause,
+     * seek, step and loop. Null for a still, and before the picture's texture has come. A picture that plays starts
+     * playing as soon as it is shown, round and round.
+     */
+    public synchronized Playback playback() {
+        return front.playback;
+    }
+
+    /**
+     * Run {@code r} whenever {@link #playback} changes or moves: a picture that plays has come or gone, or its frame,
+     * its clock's state or its loop has changed. On the timeline, the GUI thread or a decode thread; keep it cheap.
+     */
+    public void onPlayback(Runnable r) {
+        onPlayback = r == null ? () -> { } : r;
     }
 
     /**
@@ -251,9 +287,8 @@ public final class ImageView {
     public synchronized void filter(ImageFilter f) {
         filter = f == null ? ImageFilter.BILINEAR : f;
         for (Layer l : List.of(front, back)) {
-            Picture p = l.picture;
-            if (p != null) {
-                l.plate.imageFilter(filter, p.sheetWidth(), p.sheetHeight());
+            if (l.picture != null && l.textureW > 0) {
+                l.plate.imageFilter(filter, l.textureW, l.textureH);
             }
         }
     }
@@ -418,6 +453,11 @@ public final class ImageView {
         private final AtomicInteger generation = new AtomicInteger();
         volatile Picture picture;
         private Scheduled animation;
+        /** How the picture plays, if it is the poster of a file that does; null otherwise and until its texture comes. */
+        Playback playback;
+        /** The size of the texture on the plate, which the filter is told: the sheet, or the stream's frames. */
+        int textureW;
+        int textureH;
         long checkered = -1;
         /** Where the transition has it: opacity, and offset across in root em. */
         volatile float alpha = 1f;
@@ -455,11 +495,26 @@ public final class ImageView {
             return generation.get() == g && picture != null;
         }
 
-        /** The texture for what was loaded at {@code g} has arrived: show it, and step it if it is animated. */
+        /**
+         * The texture for what was loaded at {@code g} has arrived: show it, and step it if it is animated. The poster
+         * of a file that plays is shown until the file's first frame comes, and then the frames as they fall due.
+         */
         void texture(int g, Picture p, SampledImage texture) {
-            plate.imageFilter(filter, p.sheetWidth(), p.sheetHeight());
+            showing(texture, p.sheetWidth(), p.sheetHeight());
+            if (p.plays()) {
+                int side = Math.max(p.frameWidth(), p.frameHeight());
+                playback = new Playback(krono, textures, (frame, w, h) -> {
+                    synchronized (ImageView.this) {
+                        if (current(g)) {
+                            showing(frame, w, h);
+                        }
+                    }
+                }, p.motion(), side, () -> onPlayback.run());
+                playback.hold(!focused);
+                playback.start(gui.offload());
+                return;
+            }
             if (!p.animated()) {
-                plate.image(texture);
                 return;
             }
             plate.image(texture, ImageRegion.cell(0, p.columns(), p.rows()));
@@ -477,6 +532,21 @@ public final class ImageView {
             });
         }
 
+        /** Put {@code texture}, {@code w x h}, on the plate, scaled with the view's filter. */
+        void showing(SampledImage texture, int w, int h) {
+            textureW = w;
+            textureH = h;
+            plate.imageFilter(filter, w, h);
+            plate.image(texture);
+        }
+
+        /** Hold the picture's playing, or let it go: for a window that is not focused. */
+        void hold(boolean hold) {
+            if (playback != null) {
+                playback.hold(hold);
+            }
+        }
+
         void place(float alpha, float dx) {
             this.alpha = alpha;
             this.dx = dx;
@@ -490,6 +560,12 @@ public final class ImageView {
                 animation.cancel();
                 animation = null;
             }
+            if (playback != null) {
+                playback.close();
+                playback = null;
+            }
+            textureW = 0;
+            textureH = 0;
             if (picture != null) {
                 picture = null;
                 plate.image(null);

@@ -30,7 +30,11 @@ dev.vexelray.codec.image        pixels, and no GUI type. Blocking: run on Gui.of
   Pictures                      a file, a class-path resource or bytes in hand, at each size asked for, from one
                                 decode. A failure is a reason, never an exception.
   Decoded                       what Pictures returns: what the source is, and a Picture per size, or why not.
-  Picture                       every frame packed into one RGBA8 sheet, scaled down and never up.
+  Picture                       every frame packed into one RGBA8 sheet, scaled down and never up; or, for a file
+                                that plays, its first frame and its Motion.
+  Motion                        that a picture is the first frame of a file that plays: its frames, length and loops.
+  Movie                         a file that plays, made a frame at a time on its own thread, each scaled and given
+                                its mip chain there; the frames made kept within a budget, so seeking back is cheap.
   Original                      a still at its own full size, any part of which is made at any size: a raster
                                 resampled, a vector rasterised again. One at a time: a photograph's is large.
   MaskField                     an SVG mask rasterised finely and made into a signed distance field by vexelray-canvas's
@@ -44,6 +48,8 @@ dev.vexelray.codec.image.gui    on vexelray-gui.
   ImageView                     one picture on a node: fitted, animated, sliding in from the side it came from,
                                 over a backdrop (dark, light, checker, magenta, green) for its transparent pixels,
                                 and posed by its caller: zoomed, moved and turned (Pose), as visual transforms.
+  Playback                      how a picture that plays is played: play, pause, seek, step, loop; paced by krono,
+                                its frames streamed through a GuiApp.stream, and held while the window is unfocused.
   ImageStarter                  for a framework application: Textures, bound to the window and unbound at shutdown.
 ```
 
@@ -70,6 +76,13 @@ final class Recipes {
 ```
 
 An application that wants another budget writes its own `@Provides Textures`, and the starter's backs off.
+
+**A file that plays is a movie, not a sheet.** `Pictures.of(path, ...)` decodes only the first frame of an animated GIF,
+WebP or APNG and gives it a `Motion`; `ImageView` shows that frame, opens a `Movie` from the file, and plays it
+through a `StreamTexture`, a few slots made once and written in turn, so a frame costs a copy and no texture. Its length
+and size are the file's business: one canvas is decoded, a few frames are made ahead, and the frames already made are
+kept up to `Movie.BUDGET`. `ImageView.playback()` is the transport. Bytes in hand and resources, having no file to play
+from, are still packed whole into a sheet.
 
 ### vexelray-codec-video
 
