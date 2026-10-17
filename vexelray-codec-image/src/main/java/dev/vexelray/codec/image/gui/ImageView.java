@@ -44,8 +44,8 @@ import java.util.concurrent.atomic.AtomicInteger;
  *
  * <p><b>Two layers, so one picture can give way to the next.</b> Each layer is a frame floating on the stage, centred
  * by its offset. A {@linkplain #show(Picture, int) step} puts the new picture on the layer in front, and once its
- * texture has arrived it fades in and slides in from the side the step came from while the old one fades and slides
- * out the other way; then the old layer lets go of its texture. Until the texture arrives the old picture stays up,
+ * texture has arrived it is thrown in across the whole stage from the side the step came from while the old one is
+ * flung out the other way, each leaning as it flies; then the old layer lets go of its texture. Until the texture arrives the old picture stays up,
  * so a step never blanks. A step that lands mid-transition takes over from where things are: the half-faded-in picture
  * becomes the one going out, from its own opacity and offset, and the one before it is dropped.
  *
@@ -127,9 +127,13 @@ public final class ImageView {
     private static final int FLOOR_MS = 20;
     private static final int DEGENERATE_MS = 100;
 
-    /** A step's transition: how long, and how far each picture slides, in root em. */
-    public static final int STEP_MS = 260;
+    /**
+     * A step's transition: how long, how far each picture is thrown when the stage's width is not yet known (in root
+     * em; otherwise the whole width), and how far it leans, in degrees, a whole width out.
+     */
+    public static final int STEP_MS = 420;
     static final float SLIDE_EM = 2.5f;
+    static final float THROW_DEG = 7f;
 
     /** A checker square, in px: big enough to read as a pattern, small enough to sit behind an icon. */
     static final int CHECK_PX = 12;
@@ -388,20 +392,29 @@ public final class ImageView {
         onFit = r == null ? () -> { } : r;
     }
 
-    /** The incoming picture fades and slides in as the outgoing one fades and slides out, from where each is now. */
+    /**
+     * The incoming picture is thrown in across the whole stage from its side as the outgoing one is flung out the other
+     * way, from where each is now, each leaning the way it travels and straightening as it lands.
+     */
     private void slide(Layer incoming, Layer outgoing, int dir) {
         int t = transition.incrementAndGet();
         float fromAlpha = outgoing.alpha;
         float fromDx = outgoing.dx;
-        incoming.place(0f, dir * SLIDE_EM);
+        NodeLayout box = stageBox;
+        float em = emPx;
+        float span = box.present() && box.content().w() > 0f ? box.content().w() / em : SLIDE_EM;
+        incoming.place(0f, dir * span, dir * THROW_DEG);
         krono.ramp(Dur.ms(STEP_MS), Ease.LINEAR, p -> {
             if (transition.get() != t) {
                 return;
             }
-            float e = Ease.OUT_CUBIC.at((float) p);
-            // Opacity in time, position eased: a fade that eases spends too long nearly-there (see Ease).
-            incoming.place((float) p, dir * SLIDE_EM * (1f - e));
-            outgoing.place(fromAlpha * (1f - (float) p), fromDx + (-dir * SLIDE_EM - fromDx) * e);
+            float q = (float) p;
+            float in = dir * span * (1f - Ease.OUT_QUART.at(q));
+            float out = fromDx + (-dir * span - fromDx) * Ease.OUT_CUBIC.at(q);
+            // The new one is solid almost at once, so it is seen flying; the old one keeps most of itself till it
+            // is nearly off.
+            incoming.place(Math.min(1f, 4f * q), in, THROW_DEG * in / span);
+            outgoing.place(fromAlpha * (1f - q * q), out, THROW_DEG * out / span);
         }, () -> {
             synchronized (this) {
                 if (transition.get() == t) {
@@ -473,9 +486,10 @@ public final class ImageView {
         int textureW;
         int textureH;
         long checkered = -1;
-        /** Where the transition has it: opacity, and offset across in root em. */
+        /** Where the transition has it: opacity, offset across in root em, and lean in degrees clockwise. */
         volatile float alpha = 1f;
         volatile float dx;
+        volatile float tilt;
         /** Where the picture is beyond fitting; {@link Pose#REST} from every load. */
         Pose pose = Pose.REST;
         /** A part of the picture drawn sharper over the plate ({@link #detail}), and its texture, which this layer owns. */
@@ -594,8 +608,13 @@ public final class ImageView {
         }
 
         void place(float alpha, float dx) {
+            place(alpha, dx, 0f);
+        }
+
+        void place(float alpha, float dx, float tilt) {
             this.alpha = alpha;
             this.dx = dx;
+            this.tilt = tilt;
             draw();
         }
 
@@ -709,7 +728,8 @@ public final class ImageView {
         void draw() {
             Pose at = pose;
             float em = emPx;
-            frame.opacity(alpha).translate(dx + at.x() / em, at.y() / em).scale(at.zoom()).rotate(at.degrees());
+            frame.opacity(alpha).translate(dx + at.x() / em, at.y() / em).scale(at.zoom())
+                    .rotate(at.degrees() + tilt);
             if (at.mirrorX() != drawnX || at.mirrorY() != drawnY) {
                 drawnX = at.mirrorX();
                 drawnY = at.mirrorY();
