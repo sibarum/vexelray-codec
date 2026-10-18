@@ -1,7 +1,11 @@
 package dev.vexelray.codec.image.gui;
 
+import dev.vexelray.codec.image.Motion;
 import dev.vexelray.codec.image.Picture;
+import dev.vexelray.codec.image.Stamp;
 import org.junit.jupiter.api.Test;
+
+import java.nio.file.Path;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
@@ -27,5 +31,20 @@ class ImageViewTest {
         float[] f = ImageView.fraction(mark, 1000f, 1000f);
         assertEquals(1f, f[0], 1e-6f);
         assertEquals(0.5f, f[1], 1e-6f);
+    }
+
+    @Test
+    void aVideoFillsItsStageButAnAnimationIsNeverEnlarged() {
+        var stamp = new Stamp(Path.of("clip"), 0L, 0L);
+        var video = new Picture(null, new byte[0], 128, 72, 1, 1, new int[1], 128, 72, false,
+                new Motion(stamp, 10, 1000, 0, Motion.ANIMATION, true));
+        float[] f = ImageView.fraction(video, 1000f, 1000f);
+        assertEquals(1f, f[0], 1e-6f);
+        assertEquals(0.5625f, f[1], 1e-6f);
+        var gif = new Picture(null, new byte[0], 128, 72, 1, 1, new int[1], 128, 72, false,
+                new Motion(stamp, 10, 1000, 0));
+        f = ImageView.fraction(gif, 1000f, 1000f);
+        assertEquals(0.128f, f[0], 1e-6f);
+        assertEquals(0.072f, f[1], 1e-6f);
     }
 }

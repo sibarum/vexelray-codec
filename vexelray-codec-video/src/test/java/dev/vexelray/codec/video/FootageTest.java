@@ -99,6 +99,7 @@ class FootageTest {
         assertEquals(30, m.frames());
         assertEquals(3000, m.durationMillis());
         assertSame(Footage.SOURCE, m.source());
+        assertTrue(p.enlarges(), "fitted, a video fills its stage");
         try (Playable played = m.open(32)) {
             Footage footage = assertInstanceOf(Footage.class, played);
             assertEquals(32, footage.width());

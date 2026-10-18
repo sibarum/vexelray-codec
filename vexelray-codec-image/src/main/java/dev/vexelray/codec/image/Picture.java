@@ -65,6 +65,14 @@ public record Picture(Object key, byte[] sheet, int frameWidth, int frameHeight,
         return motion != null;
     }
 
+    /**
+     * Whether, fitted, this may be shown larger than its own pixels to fill its stage: a {@link #vector}, which has no
+     * pixel size of its own, and a video ({@link Motion#fills}). A raster still or an animated image never is.
+     */
+    public boolean enlarges() {
+        return vector || motion != null && motion.fills();
+    }
+
     /** Whether this moves at all, one way or the other: a part made sharper from the file's own pixels would not. */
     public boolean moves() {
         return animated() || plays();

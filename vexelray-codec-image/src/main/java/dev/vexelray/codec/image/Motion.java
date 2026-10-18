@@ -14,8 +14,10 @@ import java.io.IOException;
  * @param loops          how many times the file asks to be played: 0 for forever
  * @param source         what plays the file: {@link #ANIMATION}, a {@link Movie}, for an animated image; a video's
  *                       own, from {@code vexelray-codec-video}, for a video
+ * @param fills          whether, fitted, it may be shown larger than its own pixels to fill its stage, as a player
+ *                       shows a video: what a video's motion says. An animated image, like a still, never is
  */
-public record Motion(Stamp stamp, int frames, long durationMillis, int loops, Source source) {
+public record Motion(Stamp stamp, int frames, long durationMillis, int loops, Source source, boolean fills) {
 
     /** How a file that plays is opened, its frames at most {@code side} on their long side. */
     @FunctionalInterface
@@ -28,7 +30,7 @@ public record Motion(Stamp stamp, int frames, long durationMillis, int loops, So
 
     /** An animated image's motion, played by a {@link Movie}. */
     public Motion(Stamp stamp, int frames, long durationMillis, int loops) {
-        this(stamp, frames, durationMillis, loops, ANIMATION);
+        this(stamp, frames, durationMillis, loops, ANIMATION, false);
     }
 
     /**

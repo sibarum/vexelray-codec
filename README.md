@@ -37,7 +37,8 @@ dev.vexelray.codec.image        pixels, and no GUI type. Blocking: run on Gui.of
   Picture                       every frame packed into one RGBA8 sheet, scaled down and never up; or, for a file
                                 that plays, its first frame and its Motion.
   Motion                        that a picture is the first frame of a file that plays: its frames, length and loops,
-                                and the Source that opens it (a Movie by default; a video's Footage).
+                                and the Source that opens it (a Movie by default; a video's Footage); and whether,
+                                fitted, it fills its stage beyond its own pixels (a video does; an animation never).
   Playable                      frames by number, each with its time, made ahead on a thread of their own: what a
                                 Playback plays. Movie is one; vexelray-codec-video's Footage is another.
   Movie                         a file that plays, made a frame at a time on its own thread, each scaled and given
@@ -52,9 +53,11 @@ dev.vexelray.codec.image        pixels, and no GUI type. Blocking: run on Gui.of
 
 dev.vexelray.codec.image.gui    on vexelray-gui.
   Textures                      pictures on the GPU: uploaded once, recent ones kept, the rest to GuiApp.release.
-  ImageView                     one picture on a node: fitted, animated, sliding in from the side it came from,
-                                over a backdrop (dark, light, checker, magenta, green) for its transparent pixels,
-                                and posed by its caller: zoomed, moved and turned (Pose), as visual transforms.
+  ImageView                     one picture on a node: fitted (never larger than its own pixels, unless it is a
+                                vector or a video, which fill the stage: Picture.enlarges), animated, sliding in from
+                                the side it came from, over a backdrop (dark, light, checker, magenta, green) for its
+                                transparent pixels, and posed by its caller: zoomed, moved and turned (Pose), as
+                                visual transforms.
   Playback                      how a picture that plays is played: play, pause, seek, step, loop; paced by krono,
                                 its frames streamed through a GuiApp.stream, and held while the window is unfocused.
   ImageStarter                  for a framework application: Textures, bound to the window and unbound at shutdown.
@@ -138,8 +141,11 @@ converting in the shader, would cut it by more than half and needs nothing new f
 **Or as a picture that plays.** `Videos.poster(path, side, true)` is the video's first frame carrying a `Motion` whose
 source is `Footage.SOURCE`, so an `ImageView` plays it exactly as it plays an animated GIF: `Playback`'s transport,
 stepping a frame at a time, looping, holding while the window is unfocused, and posed, zoomed and turned with the
-picture. The frames go through a `StreamTexture` rather than a texture each. A viewer that shows pictures and videos
-side by side (Pix) wants this; a player with nothing but video can keep `VideoView`.
+picture. One difference: fitted, a video fills its stage, as a player shows it, where a still or a GIF smaller than
+the stage is shown at its own size; the motion says so (`Motion.fills`, read through `Picture.enlarges`), so the
+viewer needs nothing from this module to tell them apart. The frames go through a `StreamTexture` rather than a
+texture each. A viewer that shows pictures and videos side by side (Pix) wants this; a player with nothing but video
+can keep `VideoView`.
 
 Not yet: **sound** (the stack has no audio output, and the wrapper only reports that a file has some), the display
 matrix's **rotation** (phone video shot upright plays on its side), and a **native image** (FFmpeg is shared libraries,

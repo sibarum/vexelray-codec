@@ -126,7 +126,8 @@ public final class Videos {
 
     /**
      * {@link #poster(Path, int)}, or with {@code plays} the video as a picture that plays: its first frame, carrying a
-     * {@link Motion} that a {@link Footage} plays, so an {@code ImageView} plays it as it plays an animated GIF. A video
+     * {@link Motion} that a {@link Footage} plays, so an {@code ImageView} plays it as it plays an animated GIF, except
+     * that fitted it fills its stage, as a player shows it, where a GIF is never enlarged ({@link Motion#fills}). A video
      * that does not say how long it is or how fast it plays ({@link Footage#plays}) is a poster either way.
      */
     public static Decoded poster(Path path, int side, boolean plays) {
@@ -155,7 +156,7 @@ public final class Videos {
                 return Decoded.none(path, "a video with no frames");
             }
             Motion motion = moves ? new Motion(clip.stamp(), Footage.count(info), info.durationMicros() / 1000, 0,
-                    Footage.SOURCE) : null;
+                    Footage.SOURCE, true) : null;
             Picture p = new Picture(clip.stamp(), frame.rgba(), frame.width(), frame.height(), 1, 1, new int[1],
                     info.width(), info.height(), false, motion);
             return new Decoded(path, opened.identity(), List.of(p));

@@ -457,12 +457,15 @@ public final class ImageView {
         return s;
     }
 
-    /** The size a picture is shown at in a {@code cw x ch} box, as a fraction of each side: whole and centred. */
+    /**
+     * The size a picture is shown at in a {@code cw x ch} box, as a fraction of each side: whole and centred, and no
+     * larger than its own pixels unless it {@linkplain Picture#enlarges enlarges}.
+     */
     static float[] fraction(Picture p, float cw, float ch) {
         float w = Math.max(1, p.sourceWidth());
         float h = Math.max(1, p.sourceHeight());
         float scale = Math.min(cw / w, ch / h);
-        if (!p.vector()) {
+        if (!p.enlarges()) {
             scale = Math.min(scale, 1f);
         }
         return new float[] {w * scale / cw, h * scale / ch};
