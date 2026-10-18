@@ -16,7 +16,7 @@ import java.util.Map;
 /**
  * A file that plays, made a frame at a time on a thread of its own: whoever shows it says which frame it wants
  * ({@link #want}) and takes the frames that are ready ({@link #frame}), and never waits for a decode. What a
- * {@link Picture} with a {@link Motion} is played by.
+ * {@link Picture} with a {@link Motion} is played by, as a {@link Playable}.
  *
  * <p><b>Any length, any size.</b> The decoder holds one canvas ({@link Animation}), each frame is scaled to the side
  * it is shown at and given its mip chain here, off the GUI thread, and only the frames kept are held. Nothing about
@@ -36,7 +36,7 @@ import java.util.Map;
  *
  * <p>Every method may be called from any thread.
  */
-public final class Movie implements AutoCloseable {
+public final class Movie implements Playable {
 
     /** Memory for frames already made, by default: what makes seeking back cheap. */
     public static final long BUDGET = 512L * 1024 * 1024;
@@ -142,10 +142,12 @@ public final class Movie implements AutoCloseable {
     }
 
     /** The size every frame is made at. */
+    @Override
     public int width() {
         return width;
     }
 
+    @Override
     public int height() {
         return height;
     }
@@ -160,6 +162,7 @@ public final class Movie implements AutoCloseable {
     }
 
     /** How many frames can be shown: the count the file declared, or fewer if it turned out damaged after them. */
+    @Override
     public int count() {
         synchronized (lock) {
             return frames;
@@ -167,6 +170,7 @@ public final class Movie implements AutoCloseable {
     }
 
     /** One pass, in ms, over the frames the file declared. */
+    @Override
     public long duration() {
         return duration;
     }
@@ -177,16 +181,19 @@ public final class Movie implements AutoCloseable {
     }
 
     /** How long frame {@code i} is shown, in ms. */
+    @Override
     public int delay(int i) {
         return delays[i];
     }
 
     /** When frame {@code i} starts, in ms from the start of a pass. */
+    @Override
     public long startOf(int i) {
         return starts[i];
     }
 
     /** The frame shown {@code ms} into a pass: the last one there is, at or past the end. */
+    @Override
     public int frameAt(long ms) {
         int i = Arrays.binarySearch(starts, Math.max(0, ms));
         int at = i >= 0 ? i : -i - 2;
@@ -206,6 +213,7 @@ public final class Movie implements AutoCloseable {
      * Make frame {@code i} next, and the {@link #AHEAD} after it: round to frame 0 past the end with {@code wrap}, or
      * stopping at the last frame without.
      */
+    @Override
     public void want(int i, boolean wrap) {
         synchronized (lock) {
             if (wanted == i && this.wrap == wrap) {
@@ -221,6 +229,7 @@ public final class Movie implements AutoCloseable {
      * Frame {@code i}'s mip chain ({@link MipChain}), {@link #width} by {@link #height} at level 0, or null if it has
      * not been made. The arrays are live: do not write to them.
      */
+    @Override
     public byte[][] frame(int i) {
         synchronized (lock) {
             return kept.get(i);
@@ -228,6 +237,7 @@ public final class Movie implements AutoCloseable {
     }
 
     /** Why the file stopped decoding early, or null if it has not. */
+    @Override
     public String failure() {
         synchronized (lock) {
             return failure;

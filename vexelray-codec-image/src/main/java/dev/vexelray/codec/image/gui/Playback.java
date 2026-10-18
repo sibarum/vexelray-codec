@@ -1,7 +1,7 @@
 package dev.vexelray.codec.image.gui;
 
 import dev.vexelray.codec.image.Motion;
-import dev.vexelray.codec.image.Movie;
+import dev.vexelray.codec.image.Playable;
 import dev.vexelray.gui.krono.KronoGui;
 import dev.vexelray.gui.krono.Scheduled;
 import dev.vexelray.vulkan.present.SampledImage;
@@ -18,7 +18,9 @@ import java.util.concurrent.atomic.AtomicInteger;
  * {@link dev.vexelray.codec.image.Picture} with a {@link Motion} through, and what a transport bar drives
  * ({@link ImageView#playback}).
  *
- * <p><b>Paced by krono, made by a {@link Movie}, shown through a {@link StreamTexture}.</b> A shred on the timeline
+ * <p><b>Paced by krono, made by a {@link Playable}, shown through a {@link StreamTexture}.</b> The playable is what
+ * the motion opens ({@link Motion#open}): a {@code Movie} for an animated image, a video's frames for a video, the one
+ * played the same way as the other. A shred on the timeline
  * keeps the picture's clock: it advances to each frame's time, asks the movie for the frame due, and hands it to the
  * stream, whose slot the plate is then pointed at. So a picture plays on the same clock as every animation in the
  * window, its frames are made ahead off the GUI thread, and a frame on screen costs a copy into a slot made once. A
@@ -58,7 +60,7 @@ public final class Playback {
     private final AtomicInteger generation = new AtomicInteger();
 
     // Guarded by this.
-    private Movie movie;
+    private Playable movie;
     private StreamTexture stream;
     private Scheduled clock;
     private boolean wanted = true;
@@ -87,9 +89,9 @@ public final class Playback {
     /** Open the file on {@code offload}, make the stream, and play from where the clock is. */
     void start(Executor offload) {
         offload.execute(() -> {
-            Movie m;
+            Playable m;
             try {
-                m = Movie.open(motion, side);
+                m = motion.open(side);
             } catch (IOException | RuntimeException e) {
                 synchronized (this) {
                     failure = e.getMessage() == null ? e.getClass().getSimpleName() : e.getMessage();
@@ -279,7 +281,7 @@ public final class Playback {
     /** Stop for good: the clock, the movie and its file, and the stream, once no node names it. */
     void close() {
         StreamTexture s;
-        Movie m;
+        Playable m;
         synchronized (this) {
             if (closed) {
                 return;
@@ -317,7 +319,7 @@ public final class Playback {
         if (clock != null) {
             clock.cancel();
         }
-        Movie m = movie;
+        Playable m = movie;
         clock = krono.spork("picture-movie", () -> {
             long pos = from;
             int shown = -1;

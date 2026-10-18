@@ -36,7 +36,10 @@ dev.vexelray.codec.image        pixels, and no GUI type. Blocking: run on Gui.of
   Decoded                       what Pictures returns: what the source is, and a Picture per size, or why not.
   Picture                       every frame packed into one RGBA8 sheet, scaled down and never up; or, for a file
                                 that plays, its first frame and its Motion.
-  Motion                        that a picture is the first frame of a file that plays: its frames, length and loops.
+  Motion                        that a picture is the first frame of a file that plays: its frames, length and loops,
+                                and the Source that opens it (a Movie by default; a video's Footage).
+  Playable                      frames by number, each with its time, made ahead on a thread of their own: what a
+                                Playback plays. Movie is one; vexelray-codec-video's Footage is another.
   Movie                         a file that plays, made a frame at a time on its own thread, each scaled and given
                                 its mip chain there; the frames made kept within a budget, so seeking back is cheap.
   Original                      a still at its own full size, any part of which is made at any size: a raster
@@ -86,18 +89,23 @@ WebP or APNG and gives it a `Motion`; `ImageView` shows that frame, opens a `Mov
 through a `StreamTexture`, a few slots made once and written in turn, so a frame costs a copy and no texture. Its length
 and size are the file's business: one canvas is decoded, a few frames are made ahead, and the frames already made are
 kept up to `Movie.BUDGET`. `ImageView.playback()` is the transport. Bytes in hand and resources, having no file to play
-from, are still packed whole into a sheet.
+from, are still packed whole into a sheet. What plays is whatever the motion's `Source` opens, a `Playable`, so a video
+plays through the same `Playback` (below).
 
 ### vexelray-codec-video
 
 ```
 dev.vexelray.codec.video        frames, and no GUI type. Videos blocks: run it on Gui.offload().
   Videos                        a file opened at the size it will be shown, or its poster frame as a Picture (a
-                                Decoded, as Pictures gives), a tenth of the way in. A failure is a reason.
+                                Decoded, as Pictures gives), a tenth of the way in; or, asked for one that plays, its
+                                first frame with a Motion that opens a Footage. A failure is a reason.
   Opened                        what Videos.open returns: the Clip, or why not.
   Clip                          an open file and its decoder, frames scaled down to a side and never up.
   Reel                          a Clip decoded a few frames ahead on a thread of its own. The frame due at a time,
                                 the late ones dropped; a seek replaces the queue. Owns and closes the clip.
+  Footage                       a Clip as a Playable: frames by number at the stream's rate, each given its mip chain
+                                on its own thread, a few ahead and the rest kept within a budget; forward by decoding,
+                                anywhere else by an exact seek. What plays a video on an ImageView.
 
 dev.vexelray.codec.video.gui    on vexelray-gui.
   VideoView                     one clip on a node, fitted and enlarged to its stage, paced by a krono shred: play,
@@ -126,6 +134,12 @@ A texture is never rewritten (`GuiApp.texture`), so a frame on screen is a textu
 the next one lands. At 1080p and 30 fps that is about 250 MB a second through staging. That works, but it is the cost
 to watch: open a clip at the side it is shown at, not at its own size. A GPU-side YUV path, uploading planes and
 converting in the shader, would cut it by more than half and needs nothing new from the wrapper.
+
+**Or as a picture that plays.** `Videos.poster(path, side, true)` is the video's first frame carrying a `Motion` whose
+source is `Footage.SOURCE`, so an `ImageView` plays it exactly as it plays an animated GIF: `Playback`'s transport,
+stepping a frame at a time, looping, holding while the window is unfocused, and posed, zoomed and turned with the
+picture. The frames go through a `StreamTexture` rather than a texture each. A viewer that shows pictures and videos
+side by side (Pix) wants this; a player with nothing but video can keep `VideoView`.
 
 Not yet: **sound** (the stack has no audio output, and the wrapper only reports that a file has some), the display
 matrix's **rotation** (phone video shot upright plays on its side), and a **native image** (FFmpeg is shared libraries,

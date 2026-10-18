@@ -1,6 +1,7 @@
 package dev.vexelray.codec.video;
 
 import dev.vexelray.codec.image.Decoded;
+import dev.vexelray.codec.image.Motion;
 import dev.vexelray.codec.image.Picture;
 import dev.vexelray.codec.image.Stamp;
 import sibarum.ffmpeg.Ffmpeg;
@@ -120,6 +121,15 @@ public final class Videos {
      * a video, and what a viewer shows while the video itself loads. Keyed by the file's {@link Stamp}.
      */
     public static Decoded poster(Path path, int side) {
+        return poster(path, side, false);
+    }
+
+    /**
+     * {@link #poster(Path, int)}, or with {@code plays} the video as a picture that plays: its first frame, carrying a
+     * {@link Motion} that a {@link Footage} plays, so an {@code ImageView} plays it as it plays an animated GIF. A video
+     * that does not say how long it is or how fast it plays ({@link Footage#plays}) is a poster either way.
+     */
+    public static Decoded poster(Path path, int side, boolean plays) {
         Opened opened = open(path, side);
         if (!opened.video()) {
             return Decoded.none(path, opened.identity());
@@ -127,8 +137,9 @@ public final class Videos {
         try (Clip clip = opened.clip()) {
             Video video = clip.video();
             VideoInfo info = video.info();
+            boolean moves = plays && Footage.plays(info);
             Frame frame = null;
-            if (info.timed() && info.durationMicros() > 0) {
+            if (!moves && info.timed() && info.durationMicros() > 0) {
                 try {
                     video.seek(Math.min(POSTER_MAX_US, (long) (info.durationMicros() * POSTER_AT)));
                     frame = video.next();
@@ -143,8 +154,10 @@ public final class Videos {
             if (frame == null) {
                 return Decoded.none(path, "a video with no frames");
             }
+            Motion motion = moves ? new Motion(clip.stamp(), Footage.count(info), info.durationMicros() / 1000, 0,
+                    Footage.SOURCE) : null;
             Picture p = new Picture(clip.stamp(), frame.rgba(), frame.width(), frame.height(), 1, 1, new int[1],
-                    info.width(), info.height(), false);
+                    info.width(), info.height(), false, motion);
             return new Decoded(path, opened.identity(), List.of(p));
         } catch (VideoException e) {
             return Decoded.none(path, "does not decode as a video");
