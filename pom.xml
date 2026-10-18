@@ -54,7 +54,7 @@
         <atchung.version>1.1-SNAPSHOT</atchung.version>
         <kronometer.version>1.1-SNAPSHOT</kronometer.version>
         <imagelib.version>0.1.1-SNAPSHOT</imagelib.version>
-        <ffmpeg.version>0.1.0-SNAPSHOT</ffmpeg.version>
+        <ffmpeg.version>0.1.1-SNAPSHOT</ffmpeg.version>
         <intrabuf.version>0.1.1-SNAPSHOT</intrabuf.version>
 
         <junit.version>5.11.4</junit.version>
