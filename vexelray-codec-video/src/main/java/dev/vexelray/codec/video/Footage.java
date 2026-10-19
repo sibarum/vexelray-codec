@@ -31,8 +31,12 @@ import java.util.Map;
  * <p><b>Kept, within a budget</b>, as a {@code Movie} keeps its frames: the least recently shown go first past
  * {@link #BUDGET}, so stepping back a few frames, or round a short loop, costs no decode.
  *
- * <p>Owns the clip, and closes it on its own thread once {@linkplain #close closed}. Every method may be called from
- * any thread.
+ * <p><b>With its sound, when it has one.</b> {@link #open} opens the file's sound on the speakers as well, and
+ * {@link #clock} gives it to the {@code Playback}, which then shows the frames the sound has reached. A file with no
+ * sound, or a machine with no sound device, plays its pictures on the playback's own clock, silently.
+ *
+ * <p>Owns the clip, and closes it on its own thread once {@linkplain #close closed}; and the sound, which it closes
+ * then too. Every method may be called from any thread.
  */
 public final class Footage implements Playable {
 
@@ -56,6 +60,7 @@ public final class Footage implements Playable {
     private final double rate;
     private final long duration;
     private final int run;
+    private final Sound sound;
     private final Thread thread;
 
     private final Object lock = new Object();
@@ -78,8 +83,16 @@ public final class Footage implements Playable {
     /** The stream has ended after {@link #held}. */
     private boolean atEnd;
 
-    /** Play {@code clip}, which this owns from here. Its info must say its length and its rate ({@link #plays}). */
+    /**
+     * Play {@code clip}, which this owns from here, silently. Its info must say its length and its rate
+     * ({@link #plays}).
+     */
     public Footage(Clip clip) {
+        this(clip, null);
+    }
+
+    /** Play {@code clip} and, if not null, its {@code sound}: both this one's from here. */
+    Footage(Clip clip, Sound sound) {
         VideoInfo info = clip.info();
         if (!plays(info)) {
             throw new IllegalArgumentException(clip + " does not say how long it is, or how fast it plays");
@@ -91,13 +104,16 @@ public final class Footage implements Playable {
         this.duration = Math.max(1, info.durationMicros() / 1000);
         this.frames = count(info);
         this.run = Math.max(AHEAD + 1, (int) Math.round(rate * RUN_SECONDS));
+        this.sound = sound;
         this.thread = Thread.ofPlatform().daemon().name("footage " + clip.stamp().path().getFileName())
                 .start(this::run);
     }
 
     /**
-     * Open the file {@code motion} came from, its frames at most {@code side} on their long side. Blocking: run it on
-     * {@code Gui.offload()}. Throws {@link IOException} with the reason if it does not open as a video that plays.
+     * Open the file {@code motion} came from, its frames at most {@code side} on their long side, and its sound on the
+     * speakers if it has any and there are speakers to play it on. Blocking: run it on {@code Gui.offload()}. Throws
+     * {@link IOException} with the reason if it does not open as a video that plays; a sound that will not open is
+     * not a reason, and the video plays without it.
      */
     public static Footage open(Motion motion, int side) throws IOException {
         Opened o = Videos.open(motion.stamp().path(), side);
@@ -108,7 +124,14 @@ public final class Footage implements Playable {
             o.clip().close();
             throw new IOException("a video with no length or rate");
         }
-        return new Footage(o.clip());
+        Sound sound = o.clip().info().audio() ? Sound.open(motion.stamp().path()) : null;
+        return new Footage(o.clip(), sound);
+    }
+
+    /** The sound, as the clock the frames keep time by; null when it plays silently. */
+    @Override
+    public Clock clock() {
+        return sound;
     }
 
     /** Whether a video can be played by number: it says how long it is, and how many frames a second. */
@@ -212,6 +235,9 @@ public final class Footage implements Playable {
             kept.clear();
             keptBytes = 0;
             lock.notifyAll();
+        }
+        if (sound != null) {
+            sound.close();
         }
     }
 

@@ -1,6 +1,7 @@
 package dev.vexelray.codec.image.gui;
 
 import dev.vexelray.codec.image.Motion;
+import dev.vexelray.codec.image.Playable;
 import dev.vexelray.codec.image.Pictures;
 import dev.vexelray.gui.core.Gui;
 import dev.vexelray.gui.krono.KronoGui;
@@ -125,6 +126,128 @@ class PlaybackTest {
         }
     }
 
+    @Test
+    void withAClockOfItsOwnTheFramesFollowThatClock(@TempDir Path dir) throws IOException {
+        FakeClock own = new FakeClock();
+        try (Rig r = new Rig(dir, own)) {
+            r.until(() -> r.play.frame() == 0);
+            r.until(() -> own.running);
+            assertTrue(own.running, "it runs from the first frame");
+            r.tick(500);
+            assertEquals(0, r.play.frame(), "the timeline alone does not move it");
+            assertEquals(0, r.play.position());
+            own.now = 90;
+            r.until(() -> r.play.frame() == 2);
+            assertEquals(90, r.play.position());
+        }
+    }
+
+    @Test
+    void theOwnClockStopsWithThePicturesAndGoesWhereASeekSendsThem(@TempDir Path dir) throws IOException {
+        FakeClock own = new FakeClock();
+        try (Rig r = new Rig(dir, own)) {
+            r.until(() -> own.running);
+            r.play.pause();
+            assertFalse(own.running, "a pause stops it");
+            r.play.seek(90);
+            assertEquals(90, own.now, "a seek moves it, stopped");
+            assertFalse(own.running);
+            r.play.play();
+            r.until(() -> own.running);
+            r.play.hold(true);
+            assertFalse(own.running, "so does a hold");
+            r.play.hold(false);
+            r.until(() -> own.running);
+            assertEquals(1, own.seeks.get(), "letting go is not a seek");
+            r.play.step(1);
+            assertFalse(own.running, "and a step");
+        }
+    }
+
+    @Test
+    void loopingSendsTheOwnClockBackToTheStart(@TempDir Path dir) throws IOException {
+        FakeClock own = new FakeClock();
+        try (Rig r = new Rig(dir, own)) {
+            r.until(() -> r.play.frame() == 0);
+            own.now = 160;
+            r.until(() -> own.seeks.get() == 1);
+            assertEquals(0, own.now);
+            assertTrue(own.running, "and it plays on");
+
+            r.play.loop(false);
+            r.until(() -> {
+                own.now = 160;      // again, should a pass already under way have looped it once more
+                return !r.play.wanted();
+            });
+            assertFalse(own.running, "the end stops it");
+        }
+    }
+
+    @Test
+    void quickPausePlayStepPlayPlaysOn(@TempDir Path dir) throws IOException {
+        FakeClock own = new FakeClock();
+        own.slow = true;
+        try (Rig r = new Rig(dir, own)) {
+            r.until(() -> own.running);
+            own.now = 40;
+            r.until(() -> r.play.frame() == 1);
+            r.play.pause();
+            r.play.play();
+            r.play.step(1);
+            r.play.play();
+            r.until(() -> own.running);
+            own.now = 100;
+            r.until(() -> r.play.frame() == 2);
+        }
+    }
+
+    /** A clock the test sets, and what was asked of it. */
+    private static final class FakeClock implements Playable.Clock {
+        volatile long now;
+        volatile boolean running;
+        /** Start and stop take a while, as a sound device's do. */
+        volatile boolean slow;
+        final AtomicInteger seeks = new AtomicInteger();
+
+        @Override
+        public long now() {
+            return now;
+        }
+
+        @Override
+        public void run(boolean run) {
+            if (slow) {
+                try {
+                    Thread.sleep(10);
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                }
+            }
+            running = run;
+        }
+
+        @Override
+        public void seek(long ms) {
+            now = ms;
+            seeks.incrementAndGet();
+        }
+    }
+
+    /** A movie that keeps the given clock: a stand-in for a video with sound. */
+    private record Clocked(Playable movie, Playable.Clock clock) implements Playable {
+        public int width() { return movie.width(); }
+        public int height() { return movie.height(); }
+        public int count() { return movie.count(); }
+        public long duration() { return movie.duration(); }
+        public int delay(int i) { return movie.delay(i); }
+        public long startOf(int i) { return movie.startOf(i); }
+        public int frameAt(long ms) { return movie.frameAt(ms); }
+        public void want(int i, boolean wrap) { movie.want(i, wrap); }
+        public byte[][] frame(int i) { return movie.frame(i); }
+        public String failure() { return movie.failure(); }
+        public void close() { movie.close(); }
+    }
+
     /** A headless gui, a driven clock, and a playback of {@code anim3.gif}. */
     private static final class Rig implements AutoCloseable {
 
@@ -134,11 +257,20 @@ class PlaybackTest {
         private long now;
 
         Rig(Path dir) throws IOException {
+            this(dir, null);
+        }
+
+        /** With {@code own} not null, the movie keeps that clock. */
+        Rig(Path dir, Playable.Clock own) throws IOException {
             Path gif = dir.resolve("anim3.gif");
             try (InputStream in = PlaybackTest.class.getResourceAsStream("/anim3.gif")) {
                 Files.copy(in, gif);
             }
             Motion m = Pictures.of(gif, 1024).picture().motion();
+            if (own != null) {
+                m = new Motion(m.stamp(), m.frames(), m.durationMillis(), m.loops(),
+                        (motion, side) -> new Clocked(Motion.ANIMATION.open(motion, side), own), false);
+            }
             play = new Playback(krono, new Textures(), (frame, w, h) -> { }, m, 1024, changes::incrementAndGet);
             play.start(Runnable::run);
         }

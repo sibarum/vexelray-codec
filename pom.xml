@@ -23,7 +23,7 @@
         <module>vexelray-codec-image</module>
         <!-- Videos: any file ffmpeg-wrapper decodes (H.264, HEVC, VP9, AV1 and the rest, in MP4, MKV, WebM, MOV and the
              rest), decoded ahead of the clock and played on a node, a frame uploaded as each falls due; and a poster
-             frame as a Picture. Its natives are ffmpeg-wrapper's, bundled per platform. Video only: no sound yet. -->
+             frame as a Picture. Its natives are ffmpeg-wrapper's, bundled per platform. A picture that plays plays its sound. -->
         <module>vexelray-codec-video</module>
         <!-- Meshes: OBJ, PLY, STL and OFF read into one Mesh, its vertices, faces, edges and the data on each, as
              the file says it. Plain Java, no wrapper: these formats are text and flat records. Geometry only, no
@@ -219,6 +219,10 @@
                     <configuration>
                         <!-- Codec tests decode for real, through the wrapper's native library. -->
                         <argLine>--enable-native-access=ALL-UNNAMED</argLine>
+                        <!-- A video's sound plays for real, clock and all, but out of no speaker: a test run is quiet. -->
+                        <systemPropertyVariables>
+                            <vexelray.sound>nowhere</vexelray.sound>
+                        </systemPropertyVariables>
                     </configuration>
                 </plugin>
             </plugins>

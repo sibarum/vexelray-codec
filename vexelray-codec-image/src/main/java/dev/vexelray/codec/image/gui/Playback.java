@@ -28,6 +28,11 @@ import java.util.concurrent.atomic.AtomicInteger;
  * shown, so a file that cannot be decoded as fast as it plays shows fewer frames rather than falling behind. Until
  * the first frame after a start or a seek has come, the clock waits for it.
  *
+ * <p><b>A playable with a clock of its own is followed by it.</b> A video's sound ({@link Playable#clock}) is heard at
+ * the speaker's pace, so the shred shows the frame the sound has reached rather than counting time itself. The sound
+ * starts with the first frame, stops whenever the clock does (a pause, a hold, a step, the end, a close), and goes
+ * wherever a seek or a loop sends the pictures.
+ *
  * <p><b>Held, not stopped.</b> {@link #hold} pauses it without forgetting that it was playing: the movie keeps the
  * frames it made and its place in the file, the stream keeps the frame on screen, and nothing is decoded or copied
  * until it is let go, when it plays on if it was playing. A view holds its pictures while its window is not focused.
@@ -48,6 +53,11 @@ public final class Playback {
     static final long MAX_STEP_MS = 100;
     /** How soon a frame the movie has not made yet is looked for again. */
     static final long POLL_MS = 8;
+    /**
+     * How far a playable's own clock may be from where the pictures start again before it is sought there: less, and
+     * playing on is letting go of a pause, which the sound picks up where it stopped rather than starting afresh.
+     */
+    static final long SEEK_SLACK_MS = 40;
 
     private final KronoGui krono;
     private final Textures textures;
@@ -308,6 +318,10 @@ public final class Playback {
             clock.cancel();
             clock = null;
         }
+        Playable.Clock own = movie == null ? null : movie.clock();
+        if (own != null) {
+            own.run(false);
+        }
     }
 
     /**
@@ -320,9 +334,15 @@ public final class Playback {
             clock.cancel();
         }
         Playable m = movie;
+        Playable.Clock own = m.clock();
+        if (own != null && Math.abs(own.now() - from) > SEEK_SLACK_MS) {
+            // Moved, not merely let go: the sound goes where the pictures go. Running, it stays so.
+            own.seek(from);
+        }
         clock = krono.spork("picture-movie", () -> {
             long pos = from;
             int shown = -1;
+            boolean sounding = false;
             while (generation.get() == g) {
                 boolean looping;
                 synchronized (this) {
@@ -337,6 +357,11 @@ public final class Playback {
                         shown = i;
                         if (once) {
                             return;
+                        }
+                        if (own != null && !sounding) {
+                            // The sound starts with the first frame, as the clock does without it.
+                            own.run(true);
+                            sounding = true;
                         }
                     } else if (shown < 0) {
                         // The clock waits for the first frame, so a seek or a slow open does not skip the start.
@@ -353,15 +378,22 @@ public final class Playback {
                 if (generation.get() != g) {
                     return;
                 }
-                pos += step;
+                // With a clock of its own (a video's sound), the time is the clock's: the frames follow what is heard.
+                pos = sounding ? own.now() : pos + step;
                 if (pos >= m.duration()) {
-                    if (looping) {
+                    if (looping && own != null) {
+                        pos = 0;
+                        own.seek(0);
+                    } else if (looping) {
                         pos %= Math.max(1, m.duration());
                     } else {
                         position = m.duration();
                         synchronized (this) {
                             if (generation.get() == g) {
                                 wanted = false;
+                                if (own != null) {
+                                    own.run(false);
+                                }
                             }
                         }
                         changed.run();

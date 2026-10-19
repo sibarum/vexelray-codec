@@ -45,6 +45,32 @@ public interface Playable extends AutoCloseable {
     /** Why the file stopped decoding early, or null if it has not. */
     String failure();
 
+    /**
+     * A clock this keeps for itself, which whoever shows it keeps time by instead of its own; or null, the usual
+     * case, when it has none. A video with sound has one: sound is heard at the speaker's own pace, so the frames
+     * follow the sound, never the other way round.
+     */
+    default Clock clock() {
+        return null;
+    }
+
+    /**
+     * The time a {@link Playable} keeps, steered by whoever shows it: run while the frames are being played, stopped
+     * whenever they are not, and moved with every seek. Every method may be called from any thread, and none throws:
+     * a clock that has lost its means of keeping time keeps it by the wall from where it was.
+     */
+    interface Clock {
+
+        /** Where it is, in ms into a pass. */
+        long now();
+
+        /** Start it ({@code true}) from where it is, or stop it there. Each is harmless when it is so already. */
+        void run(boolean run);
+
+        /** Put it at {@code ms} into a pass, running or stopped as it was. */
+        void seek(long ms);
+    }
+
     /** Stop decoding and close the file. Closing twice does nothing. */
     @Override
     void close();

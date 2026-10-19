@@ -20,7 +20,8 @@ library is missing.
 vexelray-codec-image     pictures, through imagelib-wrapper: PNG, JPEG, GIF, WebP, BMP, ICO, TIFF, TGA, PNM, QOI,
                          SVG; animated where the file is.
 vexelray-codec-video     videos, through ffmpeg-wrapper: H.264, HEVC, VP9, AV1 and the rest, in MP4, MKV, WebM, MOV
-                         and the rest; played on a node, a frame uploaded as each falls due. Video only, no sound yet.
+                         and the rest; played on a node, a frame uploaded as each falls due, or as a picture that
+                         plays, with its sound.
 vexelray-codec-mesh      meshes, in plain Java: OBJ, PLY (ASCII and binary), STL (ASCII and binary) and OFF, read
                          into one Mesh. Geometry only: no GUI type yet.
 vexelray-codec-asset     the stack's own asset file, .vxa: meshes, point clouds, volumes, 2D and 3D textures,
@@ -40,7 +41,8 @@ dev.vexelray.codec.image        pixels, and no GUI type. Blocking: run on Gui.of
                                 and the Source that opens it (a Movie by default; a video's Footage); and whether,
                                 fitted, it fills its stage beyond its own pixels (a video does; an animation never).
   Playable                      frames by number, each with its time, made ahead on a thread of their own: what a
-                                Playback plays. Movie is one; vexelray-codec-video's Footage is another.
+                                Playback plays. Movie is one; vexelray-codec-video's Footage is another. One may keep
+                                a Clock of its own (a video's sound), which Playback then keeps time by.
   Movie                         a file that plays, made a frame at a time on its own thread, each scaled and given
                                 its mip chain there; the frames made kept within a budget, so seeking back is cheap.
   Original                      a still at its own full size, any part of which is made at any size: a raster
@@ -108,7 +110,10 @@ dev.vexelray.codec.video        frames, and no GUI type. Videos blocks: run it o
                                 the late ones dropped; a seek replaces the queue. Owns and closes the clip.
   Footage                       a Clip as a Playable: frames by number at the stream's rate, each given its mip chain
                                 on its own thread, a few ahead and the rest kept within a budget; forward by decoding,
-                                anywhere else by an exact seek. What plays a video on an ImageView.
+                                anywhere else by an exact seek. What plays a video on an ImageView. Opens the
+                                file's sound too, when there is one and a speaker, and gives it as its Clock.
+  Sound                         (package-private) the sound as that Clock: the time being heard, and by the wall
+                                past the sound's end.
 
 dev.vexelray.codec.video.gui    on vexelray-gui.
   VideoView                     one clip on a node, fitted and enlarged to its stage, paced by a krono shred: play,
@@ -147,9 +152,18 @@ viewer needs nothing from this module to tell them apart. The frames go through 
 texture each. A viewer that shows pictures and videos side by side (Pix) wants this; a player with nothing but video
 can keep `VideoView`.
 
-Not yet: **sound** (the stack has no audio output, and the wrapper only reports that a file has some), the display
-matrix's **rotation** (phone video shot upright plays on its side), and a **native image** (FFmpeg is shared libraries,
-so they would ship beside the executable). See `ffmpeg-wrapper`'s README.
+**With its sound.** A picture that plays a video plays its sound too: `Footage.open` opens the file's sound on the
+speakers (`ffmpeg-wrapper`'s `Audio`), and gives it to `Playback` as the playable's own clock (`Playable.clock`). The
+frames then follow the sound: the shred shows the frame the sound being heard has reached, rather than counting time
+itself, because a speaker plays at its own pace and a picture can always be shown a little early or late. The sound
+starts with the first frame, stops with every pause, hold, step and end, and goes wherever a seek or a loop sends the
+pictures. Where the sound ends before the pictures, or the device is lost, the clock runs on by the wall. A file with no
+sound, or a machine with no sound device, plays silently on `Playback`'s own clock, as before. The system property
+`vexelray.sound` says where sound goes: `speakers` (the default), `nowhere` (played in real time to no device, the
+clock and all: what the build's tests use, so a test run is quiet), or `off`. `VideoView` plays pictures only.
+
+Not yet: the display matrix's **rotation** (phone video shot upright plays on its side), and a **native image**
+(FFmpeg is shared libraries, so they would ship beside the executable). See `ffmpeg-wrapper`'s README.
 
 ### vexelray-codec-mesh
 
