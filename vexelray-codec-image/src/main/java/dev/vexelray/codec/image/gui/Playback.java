@@ -11,6 +11,7 @@ import sibarum.kronometer.Time;
 
 import java.io.IOException;
 import java.util.concurrent.Executor;
+import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.atomic.AtomicInteger;
 
 /**
@@ -104,43 +105,64 @@ public final class Playback {
 
     /** Open the file on {@code offload}, make the stream, and play from where the clock is. */
     void start(Executor offload) {
-        offload.execute(() -> {
-            Playable m;
-            try {
-                m = motion.open(side);
-            } catch (IOException | RuntimeException e) {
-                synchronized (this) {
-                    failure = e.getMessage() == null ? e.getClass().getSimpleName() : e.getMessage();
-                }
-                changed.run();
+        try {
+            offload.execute(this::open);
+        } catch (RejectedExecutionException e) {
+            // Shown as the application shuts down: there is no thread to open it on, and nothing will play.
+            fail("nowhere to open it");
+        }
+    }
+
+    /** Open the file, make the stream, and play from where the clock is. Blocking: on the offload thread. */
+    private void open() {
+        Playable m;
+        try {
+            m = motion.open(side);
+        } catch (IOException | RuntimeException | LinkageError | OutOfMemoryError e) {
+            // A file that will not read or decode, or a decoder that will not load: said, never thrown, so the poster
+            // stays up with a reason instead of waiting for a movie that is not coming.
+            fail(e.getMessage() == null ? e.getClass().getSimpleName() : e.getMessage());
+            return;
+        }
+        synchronized (this) {
+            if (closed) {
+                m.close();
+                return;
+            }
+            movie = m;
+            sound();
+        }
+        boolean windowed = textures.stream(m.width(), m.height(), s -> {
+            if (s == null) {
+                fail("no room on the GPU for its frames");
                 return;
             }
             synchronized (this) {
                 if (closed) {
-                    m.close();
+                    textures.release(s);
                     return;
                 }
-                movie = m;
-                sound();
+                stream = s;
+                run(position, !playing());
             }
-            boolean windowed = textures.stream(m.width(), m.height(), s -> {
-                synchronized (this) {
-                    if (closed) {
-                        textures.release(s);
-                        return;
-                    }
-                    stream = s;
-                    run(position, !playing());
-                }
-                changed.run();
-            });
-            if (!windowed) {
-                // No window to show it in (a headless run): the clock still keeps time, and nothing is uploaded.
-                synchronized (this) {
-                    run(position, !playing());
-                }
-            }
+            changed.run();
         });
+        if (!windowed) {
+            // No window to show it in (a headless run): the clock still keeps time, and nothing is uploaded.
+            synchronized (this) {
+                if (!closed) {
+                    run(position, !playing());
+                }
+            }
+        }
+    }
+
+    /** It will not play, and why: the poster stays up. */
+    private void fail(String why) {
+        synchronized (this) {
+            failure = why;
+        }
+        changed.run();
     }
 
     /** Whether the clock runs: asked to play, and not held. */
@@ -305,7 +327,7 @@ public final class Playback {
 
     /** How many frames. */
     public synchronized int count() {
-        return movie != null ? Math.max(1, movie.count()) : motion.frames();
+        return Math.max(1, movie != null ? movie.count() : motion.frames());
     }
 
     /** When frame {@code i} starts, in ms. */
@@ -345,11 +367,14 @@ public final class Playback {
             movie = null;
             pending = null;
         }
-        if (m != null) {
-            m.close();
-        }
-        if (s != null) {
-            textures.release(s);
+        try {
+            if (m != null) {
+                m.close();
+            }
+        } finally {
+            if (s != null) {
+                textures.release(s);
+            }
         }
     }
 
@@ -412,6 +437,20 @@ public final class Playback {
                             own.run(true);
                             sounding = true;
                         }
+                    } else if (i >= m.count()) {
+                        // The file ended, or stopped decoding, before this frame (frameAt clamps, so only a file
+                        // with none at all): it is never coming. Stopped where it is, as at the end, rather than
+                        // looking for it every few milliseconds for ever.
+                        synchronized (this) {
+                            if (generation.get() == g) {
+                                wanted = false;
+                                if (own != null) {
+                                    own.run(false);
+                                }
+                            }
+                        }
+                        changed.run();
+                        return;
                     } else if (shown < 0) {
                         // The clock waits for the first frame, so a seek or a slow open does not skip the start.
                         Time.advance(Dur.ms(POLL_MS));

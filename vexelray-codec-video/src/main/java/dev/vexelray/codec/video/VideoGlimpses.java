@@ -6,7 +6,6 @@ import dev.vexelray.codec.image.Picture;
 import dev.vexelray.codec.image.Stamp;
 import sibarum.ffmpeg.Frame;
 import sibarum.ffmpeg.Video;
-import sibarum.ffmpeg.VideoException;
 import sibarum.ffmpeg.VideoInfo;
 import sibarum.probe.Log;
 
@@ -90,7 +89,12 @@ public final class VideoGlimpses implements Glimpses {
             o.clip().close();
             throw new IOException("a video with no length or rate");
         }
-        return new VideoGlimpses(o.clip());
+        try {
+            return new VideoGlimpses(o.clip());
+        } catch (RuntimeException | Error e) {
+            o.clip().close();   // no thread to own it, so nobody else would
+            throw e;
+        }
     }
 
     @Override
@@ -169,7 +173,12 @@ public final class VideoGlimpses implements Glimpses {
                         continue;   // overtaken while it was made: the newer ask is told instead
                     }
                 }
-                tell.accept(p);
+                try {
+                    tell.accept(p);
+                } catch (RuntimeException e) {
+                    // The caller's, not the file's: said, and the glimpses go on for the next ask.
+                    LOG.warn("a glimpse of {} was refused: {}", clip.stamp().path(), e.toString());
+                }
             }
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
@@ -189,8 +198,10 @@ public final class VideoGlimpses implements Glimpses {
             }
             return new Picture(new Key(clip.stamp(), i), f.rgba(), f.width(), f.height(), 1, 1, new int[1],
                     clip.info().width(), clip.info().height(), false);
-        } catch (VideoException e) {
-            LOG.debug("{} gave no glimpse at frame {}: {}", clip.stamp().path(), i, e.getMessage());
+        } catch (RuntimeException e) {
+            // A damaged stream (VideoException), or anything else the decoder threw: no glimpse, and the next ask
+            // starts afresh.
+            LOG.debug("{} gave no glimpse at frame {}: {}", clip.stamp().path(), i, e.toString());
             held = null;
             ahead = null;
             return null;

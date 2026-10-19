@@ -12,6 +12,7 @@ import sibarum.ffmpeg.VideoInfo;
 import sibarum.probe.Log;
 
 import java.io.IOException;
+import java.io.InputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
@@ -99,21 +100,94 @@ public final class Videos {
         Video video;
         try {
             video = Ffmpeg.open(path);
-        } catch (VideoException e) {
+        } catch (RuntimeException e) {
             LOG.debug("{} did not open as a video: {}", path, e.getMessage());
-            return Opened.none(path, "not a video");
+            return Opened.none(path, unopened(e.getMessage(), head(path)));
         } catch (LinkageError e) {
             unavailable(e);
             return Opened.none(path, "the video decoder is unavailable");
+        } catch (OutOfMemoryError e) {
+            return Opened.none(path, "too large to decode");
         }
         try {
             VideoInfo info = video.info();
             int[] out = fit(info.width(), info.height(), side);
             video.output(out[0], out[1]);
             return new Opened(path, describe(info), new Clip(stamp, video, describe(info)));
-        } catch (RuntimeException e) {
-            video.close();
+        } catch (RuntimeException | OutOfMemoryError e) {
+            closeQuietly(video);
             return Opened.none(path, "does not decode as a video");
+        }
+    }
+
+    /**
+     * Why a file did not open: one whose first bytes, {@code head}, are a video container's, or whose streams FFmpeg
+     * found and could not read, is a damaged video, not something else altogether. FFmpeg's own message cannot say
+     * which: it picks a demuxer by the name when the bytes do not decide, so a text file called {@code .mp4} fails as a
+     * damaged MP4 does ("moov atom not found").
+     */
+    static String unopened(String message, byte[] head) {
+        String m = message == null ? "" : message;
+        if (m.contains("no decoder for the video stream")) {
+            return "no decoder for its video";
+        }
+        if (m.contains("no video stream")) {
+            return "not a video";   // read whole, and only sound in it (an .m4a is an MP4 too)
+        }
+        if (m.contains("could not read the streams") || m.contains("could not set the decoder up")
+                || m.contains("has no size") || container(head)) {
+            return "a damaged video";
+        }
+        return "not a video";
+    }
+
+    /** Whether {@code b} starts as a video container does: MP4 and MOV, Matroska and WebM, AVI, ASF, FLV, MPEG, Ogg. */
+    static boolean container(byte[] b) {
+        return at(b, 4, "ftyp") || at(b, 4, "moov") || at(b, 4, "mdat")
+                || starts(b, 0x1A, 0x45, 0xDF, 0xA3)
+                || at(b, 0, "RIFF") && at(b, 8, "AVI ")
+                || starts(b, 0x30, 0x26, 0xB2, 0x75, 0x8E, 0x66, 0xCF, 0x11)
+                || at(b, 0, "FLV") || starts(b, 0, 0, 1, 0xBA) || starts(b, 0, 0, 1, 0xB3) || at(b, 0, "OggS");
+    }
+
+    private static boolean at(byte[] b, int offset, String ascii) {
+        if (b.length < offset + ascii.length()) {
+            return false;
+        }
+        for (int i = 0; i < ascii.length(); i++) {
+            if (b[offset + i] != ascii.charAt(i)) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private static boolean starts(byte[] b, int... signature) {
+        if (b.length < signature.length) {
+            return false;
+        }
+        for (int i = 0; i < signature.length; i++) {
+            if ((b[i] & 0xFF) != signature[i]) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    /** The first bytes of {@code path}, enough to tell a container by; none if it will not read. */
+    private static byte[] head(Path path) {
+        try (InputStream in = Files.newInputStream(path)) {
+            return in.readNBytes(16);
+        } catch (IOException | RuntimeException e) {
+            return new byte[0];
+        }
+    }
+
+    private static void closeQuietly(Video video) {
+        try {
+            video.close();
+        } catch (RuntimeException | LinkageError e) {
+            LOG.debug("{} did not close: {}", video, e.toString());
         }
     }
 
@@ -162,12 +236,31 @@ public final class Videos {
             Picture p = new Picture(clip.stamp(), frame.rgba(), frame.width(), frame.height(), 1, 1, new int[1],
                     info.width(), info.height(), false, motion);
             return new Decoded(path, opened.identity(), List.of(p));
-        } catch (VideoException e) {
-            return Decoded.none(path, "does not decode as a video");
-        } catch (OutOfMemoryError e) {
+        } catch (RuntimeException | Error e) {
+            return failed(path, e);
+        }
+    }
+
+    /**
+     * What a decode that threw comes back as: a reason, whatever was thrown, since none of this throws. A video too
+     * large to hold, a decoder gone, anything else: a video that does not decode.
+     */
+    private static Decoded failed(Path path, Throwable e) {
+        if (e instanceof OutOfMemoryError) {
             LOG.warn("{} is too large to decode", path);
             return Decoded.none(path, "too large to decode");
         }
+        if (e instanceof LinkageError l) {
+            unavailable(l);
+            return Decoded.none(path, "the video decoder is unavailable");
+        }
+        if (e instanceof Error fatal) {
+            throw fatal;   // the machine's (a stack, an internal error), not the file's
+        }
+        if (!(e instanceof VideoException)) {
+            LOG.warn("{} did not decode: {}", path, e.toString());
+        }
+        return Decoded.none(path, "does not decode as a video");
     }
 
     /**
@@ -187,15 +280,16 @@ public final class Videos {
     /**
      * {@link #slides(Path, int, int, int)}, handing {@code first} the first frame that decodes, as a still, the moment
      * it does, with what the file is: something to show while the rest are found, which in a long HD video is most of
-     * the wait. Called at most once, on the calling thread, and not at all for a slideshow of one frame.
+     * the wait. Called at most once, on the calling thread, and not at all for a slideshow of one frame. No frames, or
+     * none of any length, is a reason like any other.
      */
     public static Decoded slides(Path path, int count, int side, int millis, BiConsumer<String, Picture> first) {
         if (count < 1 || millis < 1) {
-            throw new IllegalArgumentException("count " + count + ", millis " + millis);
+            return Decoded.none(path, "no slides asked for");
         }
         int columns = (int) Math.ceil(Math.sqrt(count));
-        int rows = (count + columns - 1) / columns;
-        int fits = Picture.SHEET_SIDE / Math.max(columns, rows);
+        int rows = (int) (((long) count + columns - 1) / columns);
+        int fits = Math.max(1, Picture.SHEET_SIDE / Math.max(columns, rows));
         Opened opened = open(path, side <= 0 ? fits : Math.min(side, fits));
         if (!opened.video()) {
             return Decoded.none(path, opened.identity());
@@ -215,8 +309,9 @@ public final class Videos {
                                 first.accept(opened.identity(), sheet(clip.stamp(), frames, millis, info));
                             }
                         }
-                    } catch (VideoException e) {
-                        LOG.debug("{} gave no frame {} of {}: {}", path, k, count, e.getMessage());
+                    } catch (RuntimeException e) {
+                        // Left out, whatever the decoder threw for it: the rest may still decode.
+                        LOG.debug("{} gave no frame {} of {}: {}", path, k, count, e.toString());
                     }
                 }
             }
@@ -229,11 +324,8 @@ public final class Videos {
                 frames.add(f);
             }
             return new Decoded(path, opened.identity(), List.of(sheet(clip.stamp(), frames, millis, info)));
-        } catch (VideoException e) {
-            return Decoded.none(path, "does not decode as a video");
-        } catch (OutOfMemoryError e) {
-            LOG.warn("{} is too large to decode", path);
-            return Decoded.none(path, "too large to decode");
+        } catch (RuntimeException | Error e) {
+            return failed(path, e);
         }
     }
 

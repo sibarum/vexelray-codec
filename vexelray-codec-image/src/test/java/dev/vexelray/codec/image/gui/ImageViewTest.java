@@ -3,11 +3,18 @@ package dev.vexelray.codec.image.gui;
 import dev.vexelray.codec.image.Motion;
 import dev.vexelray.codec.image.Picture;
 import dev.vexelray.codec.image.Stamp;
+import dev.vexelray.gui.core.Gui;
+import dev.vexelray.gui.core.layout.Length;
+import dev.vexelray.gui.krono.KronoGui;
 import org.junit.jupiter.api.Test;
+import sibarum.atchung.Atchung;
+import sibarum.kronometer.Kron;
 
 import java.nio.file.Path;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 
 /** Where a picture sits on its stage: whole, centred, and a raster never larger than its own pixels. */
 class ImageViewTest {
@@ -46,5 +53,16 @@ class ImageViewTest {
         f = ImageView.fraction(gif, 1000f, 1000f);
         assertEquals(0.128f, f[0], 1e-6f);
         assertEquals(0.072f, f[1], 1e-6f);
+    }
+
+    @Test
+    void showingNothingIsClearingNotAThrow() {
+        var gui = new Gui(Atchung.create());
+        var krono = KronoGui.attach(gui, Kron.driven());
+        ImageView view = new ImageView(gui, krono, new Textures(), Length.ZERO, Length.ZERO);
+        assertFalse(view.show(null, 1));
+        assertNull(view.playback());
+        assertNull(view.fitted());
+        krono.close();
     }
 }

@@ -3,7 +3,6 @@ package dev.vexelray.codec.video;
 import dev.vexelray.codec.image.Playable;
 import sibarum.ffmpeg.Audio;
 import sibarum.ffmpeg.Ffmpeg;
-import sibarum.ffmpeg.VideoException;
 import sibarum.probe.Log;
 
 import java.nio.file.Path;
@@ -60,7 +59,7 @@ final class Sound implements Playable.Clock {
                     : Audio.Output.SPEAKERS);
             LOG.debug("{} plays with its sound, {} to {}", path.getFileName(), audio, where);
             return new Sound(audio);
-        } catch (VideoException e) {
+        } catch (RuntimeException e) {
             LOG.info("{} plays without sound: {}", path, e.getMessage());
         } catch (LinkageError e) {
             LOG.warn("{} plays without sound: the sound decoder is unavailable ({})", path, e.toString());
@@ -80,7 +79,7 @@ final class Sound implements Playable.Clock {
             }
             lastMs = ms;
             return ms + over();
-        } catch (VideoException e) {
+        } catch (RuntimeException | LinkageError e) {
             lose(e);
             return lastMs + over();
         }
@@ -107,7 +106,7 @@ final class Sound implements Playable.Clock {
             } else {
                 audio.pause();
             }
-        } catch (VideoException e) {
+        } catch (RuntimeException | LinkageError e) {
             lose(e);
         }
     }
@@ -127,7 +126,7 @@ final class Sound implements Playable.Clock {
         }
         try {
             audio.seek(to * 1000);
-        } catch (VideoException e) {
+        } catch (RuntimeException | LinkageError e) {
             lose(e);
         }
     }
@@ -139,7 +138,7 @@ final class Sound implements Playable.Clock {
         }
         try {
             audio.volume(Math.max(0f, Math.min(1f, volume)));
-        } catch (VideoException e) {
+        } catch (RuntimeException | LinkageError e) {
             lose(e);
         }
     }
@@ -151,7 +150,12 @@ final class Sound implements Playable.Clock {
         }
         bank();
         closed = true;
-        audio.close();
+        try {
+            audio.close();
+        } catch (RuntimeException | LinkageError e) {
+            // A device already gone: there is nothing left to give back, and closing does not throw.
+            LOG.debug("{} did not close: {}", audio.file(), e.toString());
+        }
     }
 
     /** The time run on by the wall past the sound, in ms. Under this. */
@@ -166,8 +170,8 @@ final class Sound implements Playable.Clock {
     }
 
     /** The sound has failed: keep time by the wall from where it was, silently. Under this. */
-    private void lose(VideoException e) {
-        LOG.warn("{} lost its sound at {} ms: {}", audio.file(), lastMs, e.getMessage());
+    private void lose(Throwable e) {
+        LOG.warn("{} lost its sound at {} ms: {}", audio.file(), lastMs, e.toString());
         lost = true;
         overSince = running ? System.nanoTime() : -1;
     }

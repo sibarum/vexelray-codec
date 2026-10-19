@@ -223,9 +223,13 @@ public final class ImageView {
      * Show {@code p}, arriving from the side {@code direction} says: 1 for the next picture (in from the right), -1 for
      * the previous, 0 for none (it replaces what is up the moment it is ready). The texture arrives later, on the GUI
      * thread, and is dropped if something else has been shown by then. False if there is no window to upload into (a
-     * headless capture), in which case nothing is shown.
+     * headless capture), in which case nothing is shown; and for null, which shows nothing, as {@link #clear} does.
      */
     public synchronized boolean show(Picture p, int direction) {
+        if (p == null) {
+            clear();
+            return false;
+        }
         // Whatever was moving stops where it is: the picture fading out is finished with, and the one in front
         // starts going out from wherever it has got to.
         transition.incrementAndGet();

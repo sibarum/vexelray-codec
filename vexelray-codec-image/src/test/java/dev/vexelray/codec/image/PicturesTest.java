@@ -129,6 +129,34 @@ class PicturesTest {
     }
 
     @Test
+    void anEmptyFileOrATruncatedAnimationIsAReasonNotAnException(@TempDir Path dir) throws IOException {
+        Path empty = Files.createFile(dir.resolve("empty.png"));
+        assertEquals("not an image", Pictures.of(empty, 64).identity());
+
+        // The header and the start of the first frame of an animated GIF: it says it may play, and has no frame.
+        byte[] gif = PicturesTest.class.getResourceAsStream("/anim3.gif").readAllBytes();
+        Path cut = dir.resolve("cut.gif");
+        Files.write(cut, java.util.Arrays.copyOf(gif, 20));
+        Decoded d = Pictures.of(cut, 64);
+        assertFalse(d.image());
+        assertEquals("does not decode as an image", d.identity());
+    }
+
+    @Test
+    void aSideOfNothingOrLessIsTheSourcesOwn(@TempDir Path dir) throws IOException {
+        Path png = dir.resolve("small.png");
+        ImageIO.write(new BufferedImage(300, 200, BufferedImage.TYPE_INT_ARGB), "png", png.toFile());
+        Decoded d = Pictures.of(png, 0, -5);
+        assertEquals(300, d.picture().frameWidth(), "not a pixel across");
+        assertEquals(300, d.picture(1).frameWidth());
+
+        Path svg = dir.resolve("mark.svg");
+        Files.writeString(svg, SVG, StandardCharsets.UTF_8);
+        assertEquals(40, Pictures.of(svg, 0).picture().frameWidth());
+        assertEquals(80, Pictures.of(svg, -1, 80).picture(1).frameWidth(), "the largest asked still rules");
+    }
+
+    @Test
     void namesAreMatchedByExtensionIgnoringCase() {
         assertTrue(Pictures.named(Path.of("IMG_1.JPG")));
         assertTrue(Pictures.named(Path.of("a.webp")));

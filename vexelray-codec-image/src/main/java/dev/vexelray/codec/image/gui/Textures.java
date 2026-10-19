@@ -6,6 +6,7 @@ import dev.vexelray.gui.core.app.GuiApp;
 import dev.vexelray.vulkan.present.AtlasTexture;
 import dev.vexelray.vulkan.present.SampledImage;
 import dev.vexelray.vulkan.present.StreamTexture;
+import sibarum.probe.Log;
 
 import java.util.function.Consumer;
 
@@ -31,6 +32,8 @@ public final class Textures {
 
     /** Slots in a picture that plays: one shown, one landing, one being written. */
     static final int SLOTS = 3;
+
+    private static final Log LOG = Log.of("codec.image");
 
     private final long budget;
     private volatile GuiApp app;
@@ -71,7 +74,8 @@ public final class Textures {
 
     /**
      * Hand {@code picture}'s texture to {@code then} on the GUI thread, uploading it if it is not already there.
-     * False if there is no window to upload into, in which case {@code then} is never called.
+     * False if there is no window to upload into, in which case {@code then} is never called; nor is it if the device
+     * will not make the texture, which is logged.
      *
      * <p>A still is uploaded as a picture ({@code GuiApp.picture}): with its mip chain, and read in linear light, so
      * drawn small it is averaged rather than skipped. An animation's sheet is not, since a level would blend one
@@ -103,9 +107,15 @@ public final class Textures {
             Key key = Key.of(picture);
             Uploaded u = textures.get(key);
             if (u == null || u.texture().isClosed()) {
-                AtlasTexture t = asPicture
-                        ? window.picture(picture.sheet(), picture.sheetWidth(), picture.sheetHeight())
-                        : window.texture(picture.sheet(), picture.sheetWidth(), picture.sheetHeight());
+                AtlasTexture t;
+                try {
+                    t = asPicture
+                            ? window.picture(picture.sheet(), picture.sheetWidth(), picture.sheetHeight())
+                            : window.texture(picture.sheet(), picture.sheetWidth(), picture.sheetHeight());
+                } catch (RuntimeException e) {
+                    unmade(picture, e);
+                    return;
+                }
                 // A chain is a third again of the image's own bytes.
                 u = new Uploaded(t, asPicture ? picture.bytes() * 4 / 3 : picture.bytes());
                 textures.put(key, u);
@@ -121,6 +131,14 @@ public final class Textures {
      * owns it and gives it back with {@link #release}. False if there is no window to upload into.
      */
     public boolean upload(Picture picture, Consumer<SampledImage> then) {
+        return upload(picture, then, () -> { });
+    }
+
+    /**
+     * As {@link #upload(Picture, Consumer)}, and {@code unmade} is run on the GUI thread instead of {@code then} if the
+     * device will not make the texture: for a caller waiting on its upload, which would otherwise wait for ever.
+     */
+    public boolean upload(Picture picture, Consumer<SampledImage> then, Runnable unmade) {
         GuiApp window = app;
         if (window == null) {
             return false;
@@ -129,9 +147,25 @@ public final class Textures {
             if (app != window) {
                 return;
             }
-            then.accept(window.texture(picture.sheet(), picture.sheetWidth(), picture.sheetHeight()));
+            AtlasTexture t;
+            try {
+                t = window.texture(picture.sheet(), picture.sheetWidth(), picture.sheetHeight());
+            } catch (RuntimeException e) {
+                unmade(picture, e);
+                unmade.run();
+                return;
+            }
+            then.accept(t);
         });
         return true;
+    }
+
+    /**
+     * A texture the device would not make (out of memory, a size it refuses): said, and nothing handed over. Thrown, it
+     * would end the window's loop, where every posted task runs.
+     */
+    private static void unmade(Object what, RuntimeException e) {
+        LOG.warn("no texture for {}: {}", what, e.toString());
     }
 
     /**
@@ -153,7 +187,8 @@ public final class Textures {
     /**
      * Make a stream of {@code width x height} pictures ({@code GuiApp.stream}), with a mip chain per frame, and hand it
      * to {@code then} on the GUI thread: what a picture that plays is shown through. Outside the cache; the caller owns
-     * it and gives it back with {@link #release(StreamTexture)}. False if there is no window to make it in.
+     * it and gives it back with {@link #release(StreamTexture)}. {@code then} is given null if the device would not make
+     * it. False if there is no window to make it in.
      */
     public boolean stream(int width, int height, Consumer<StreamTexture> then) {
         GuiApp window = app;
@@ -162,7 +197,14 @@ public final class Textures {
         }
         window.post(() -> {
             if (app == window) {
-                then.accept(window.stream(width, height, SLOTS, true));
+                StreamTexture s;
+                try {
+                    s = window.stream(width, height, SLOTS, true);
+                } catch (RuntimeException e) {
+                    unmade("a " + width + "x" + height + " stream", e);
+                    s = null;
+                }
+                then.accept(s);
             }
         });
         return true;

@@ -92,10 +92,14 @@ public record Picture(Object key, byte[] sheet, int frameWidth, int frameHeight,
     }
 
     /**
-     * Pack {@code frames} with each frame at most {@code side} on its long side. {@code vector} only says where the
-     * pixels came from. One decode can make several sizes, which is why the size is a parameter and not a decode.
+     * Pack {@code frames} with each frame at most {@code side} on its long side (0 or less: as large as a sheet holds).
+     * {@code vector} only says where the pixels came from. One decode can make several sizes, which is why the size is
+     * a parameter and not a decode.
      */
     public static Picture of(Object key, Frames frames, int sourceWidth, int sourceHeight, boolean vector, int side) {
+        if (side <= 0) {
+            side = SHEET_SIDE;
+        }
         int[] keep = thin(frames.count());
         int n = keep.length;
         int[] delays = new int[n];

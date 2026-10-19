@@ -17,6 +17,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
@@ -154,6 +155,18 @@ class MovieTest {
         assertArrayEquals(new int[] {4, 3}, Movie.fitted(4, 3, 1024));
         assertArrayEquals(new int[] {1024, 512}, Movie.fitted(2048, 1024, 1024));
         assertArrayEquals(new int[] {Picture.SHEET_SIDE, Picture.SHEET_SIDE / 2}, Movie.fitted(20_000, 10_000, 99_999));
+        assertArrayEquals(new int[] {4, 3}, Movie.fitted(4, 3, 0), "no side is its own, not a pixel");
+        assertArrayEquals(new int[] {Picture.SHEET_SIDE, Picture.SHEET_SIDE / 2}, Movie.fitted(20_000, 10_000, -1));
+    }
+
+    @Test
+    void aFileEmptiedOrGoneSinceItsPosterDoesNotOpen(@TempDir Path dir) throws IOException {
+        Path gif = file(dir, "anim3.gif");
+        Motion m = Pictures.of(gif, 1024).picture().motion();
+        Files.write(gif, new byte[0]);
+        assertThrows(RuntimeException.class, () -> Movie.open(m, 1024).close());
+        Files.delete(gif);
+        assertThrows(IOException.class, () -> Movie.open(m, 1024).close());
     }
 
     private static byte[][] await(Movie movie, int i) throws InterruptedException {

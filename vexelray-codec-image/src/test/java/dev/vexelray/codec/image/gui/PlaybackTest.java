@@ -3,6 +3,7 @@ package dev.vexelray.codec.image.gui;
 import dev.vexelray.codec.image.Motion;
 import dev.vexelray.codec.image.Playable;
 import dev.vexelray.codec.image.Pictures;
+import dev.vexelray.codec.image.Stamp;
 import dev.vexelray.gui.core.Gui;
 import dev.vexelray.gui.krono.KronoGui;
 import org.junit.jupiter.api.Test;
@@ -15,6 +16,7 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.BooleanSupplier;
 import java.util.function.Consumer;
@@ -239,6 +241,90 @@ class PlaybackTest {
             r.play.muted(false);
             assertEquals(0.25f, own.volume);
         }
+    }
+
+    @Test
+    void aDecoderThatWillNotLoadIsAFailureNotAThrow() {
+        Motion m = new Motion(new Stamp(Path.of("gone.gif"), 1, 1), 3, 150, 0, (motion, side) -> {
+            throw new UnsatisfiedLinkError("no imagelib here");
+        }, false);
+        KronoGui krono = KronoGui.attach(new Gui(Atchung.create()), Kron.driven());
+        AtomicInteger changes = new AtomicInteger();
+        Playback p = new Playback(krono, new Textures(), (frame, w, h) -> { }, m, 64, changes::incrementAndGet);
+        p.start(Runnable::run);
+        assertEquals("no imagelib here", p.failure());
+        assertEquals(1, changes.get(), "and said");
+        p.close();
+        krono.close();
+    }
+
+    @Test
+    void nowhereToOpenItIsAFailureNotAThrow(@TempDir Path dir) throws IOException {
+        Motion m = Pictures.of(gif(dir), 1024).picture().motion();
+        KronoGui krono = KronoGui.attach(new Gui(Atchung.create()), Kron.driven());
+        Playback p = new Playback(krono, new Textures(), (frame, w, h) -> { }, m, 64, () -> { });
+        p.start(task -> {
+            throw new RejectedExecutionException("shut down");
+        });
+        assertEquals("nowhere to open it", p.failure());
+        p.close();
+        krono.close();
+    }
+
+    @Test
+    void aFileWithNoFramesToShowStopsRatherThanWaitingForEver(@TempDir Path dir) throws IOException {
+        Motion gif = Pictures.of(gif(dir), 1024).picture().motion();
+        Motion m = new Motion(gif.stamp(), 3, 150, 0, (motion, side) -> new Empty(), false);
+        KronoGui krono = KronoGui.attach(new Gui(Atchung.create()), Kron.driven());
+        AtomicInteger changes = new AtomicInteger();
+        Playback p = new Playback(krono, new Textures(), (frame, w, h) -> { }, m, 64, changes::incrementAndGet);
+        p.start(Runnable::run);
+        for (int t = 1; t <= 100 && p.wanted(); t++) {
+            krono.tick(Dur.ms(t));
+        }
+        assertFalse(p.wanted(), "stopped, as at the end");
+        assertEquals("no frames to show", p.failure());
+        assertEquals(-1, p.frame(), "the poster stays up");
+        p.step(1);
+        p.seek(-5);
+        p.close();
+        p.close();
+        krono.close();
+    }
+
+    @Test
+    void steppingBeforeTheFileHasOpenedDoesNotThrow() {
+        Motion m = new Motion(new Stamp(Path.of("slow.gif"), 1, 1), 0, 0, 0, (motion, side) -> new Empty(), false);
+        KronoGui krono = KronoGui.attach(new Gui(Atchung.create()), Kron.driven());
+        Playback p = new Playback(krono, new Textures(), (frame, w, h) -> { }, m, 64, () -> { });
+        p.step(1);
+        p.step(-3);
+        assertEquals(0, p.position());
+        p.close();
+        krono.close();
+    }
+
+    /** A playable whose file turned out to have nothing in it: no frames, and says so. */
+    private static final class Empty implements Playable {
+        public int width() { return 4; }
+        public int height() { return 3; }
+        public int count() { return 0; }
+        public long duration() { return 150; }
+        public int delay(int i) { return 50; }
+        public long startOf(int i) { return 0; }
+        public int frameAt(long ms) { return 0; }
+        public void want(int i, boolean wrap) { }
+        public byte[][] frame(int i) { return null; }
+        public String failure() { return "no frames to show"; }
+        public void close() { }
+    }
+
+    private static Path gif(Path dir) throws IOException {
+        Path gif = dir.resolve("anim3.gif");
+        try (InputStream in = PlaybackTest.class.getResourceAsStream("/anim3.gif")) {
+            Files.copy(in, gif);
+        }
+        return gif;
     }
 
     /** A clock the test sets, and what was asked of it. */

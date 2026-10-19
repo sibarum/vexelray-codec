@@ -195,6 +195,11 @@ public final class VideoView {
         return reel == null ? -1 : reel.clip().info().durationMicros();
     }
 
+    /** Why the clip stopped decoding early, or null if it has not, or nothing is playing. */
+    public synchronized String failure() {
+        return reel == null ? null : reel.failure();
+    }
+
     /** The time in the clip of the frame on the plate, or -1 before the first has been shown. */
     public synchronized long shownMicros() {
         return shownMicros;
@@ -211,6 +216,7 @@ public final class VideoView {
         clock = krono.spork("video", () -> {
             long now = from;
             boolean primed = false;
+            boolean looped = false;
             while (generation.get() == g) {
                 Frame f = r.due(now);
                 if (f != null) {
@@ -221,11 +227,14 @@ public final class VideoView {
                     }
                 }
                 if (r.finished()) {
-                    if (once || !ended(g, r)) {
+                    // A pass from the start that showed nothing (a file that fails at once, or has no frames) is not
+                    // looped again: it would fail again every few milliseconds, for ever.
+                    if (once || !ended(g, r, !(looped && !primed))) {
                         return;
                     }
                     now = 0;
                     primed = false;
+                    looped = true;
                 }
                 long next = r.next();
                 long step = next > now ? Math.min(next - now, MAX_STEP_US) : WAIT_US;
@@ -245,14 +254,17 @@ public final class VideoView {
         });
     }
 
-    /** The reel has run out: from the start again if looping (true), else held at the end, and said so (false). */
-    private boolean ended(int g, Reel r) {
+    /**
+     * The reel has run out: from the start again if looping and {@code again} (true), else held at the end, and said
+     * so (false).
+     */
+    private boolean ended(int g, Reel r, boolean again) {
         Runnable then;
         synchronized (this) {
             if (generation.get() != g) {
                 return false;
             }
-            if (loop) {
+            if (loop && again) {
                 r.seek(0);
                 position = 0;
                 return true;
@@ -305,6 +317,21 @@ public final class VideoView {
                 pending = null;
                 if (next == null) {
                     inFlight = -1;
+                    return;
+                }
+            }
+            upload(g, next);
+        }, () -> {
+            // The device would not make this frame's texture: the frame is skipped, and the next one due is tried
+            // rather than the picture freezing with an upload "on its way" that never lands.
+            Frame next;
+            synchronized (this) {
+                next = generation.get() == g ? pending : null;
+                pending = null;
+                if (next == null) {
+                    if (inFlight == g) {
+                        inFlight = -1;
+                    }
                     return;
                 }
             }

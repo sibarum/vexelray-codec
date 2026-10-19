@@ -2,7 +2,6 @@ package dev.vexelray.codec.video;
 
 import sibarum.ffmpeg.Frame;
 import sibarum.ffmpeg.Video;
-import sibarum.ffmpeg.VideoException;
 import sibarum.probe.Log;
 
 import java.util.ArrayDeque;
@@ -40,6 +39,8 @@ public final class Reel implements AutoCloseable {
     /** The clip has no more frames after those queued. */
     private boolean ended;
     private boolean closed;
+    /** The thread has stopped for good: a seek finds nothing to decode it, so it stays finished. */
+    private boolean dead;
     private String failure;
 
     /** Start decoding {@code clip} from where it is (the start, for a clip just opened). */
@@ -102,6 +103,9 @@ public final class Reel implements AutoCloseable {
     /** Decode from {@code micros} on: the next frame due is the one shown then. */
     public void seek(long micros) {
         synchronized (queue) {
+            if (dead) {
+                return;
+            }
             seekTo = Math.max(0, micros);
             queue.clear();
             ended = false;
@@ -148,9 +152,13 @@ public final class Reel implements AutoCloseable {
                         video.seek(target);
                     }
                     frame = video.next();
-                } catch (VideoException e) {
+                } catch (RuntimeException e) {
+                    // A damaged stream (VideoException), or anything else the decoder threw: it ends here.
                     frame = null;
-                    why = e.getMessage();
+                    why = e.getMessage() == null ? e.toString() : e.getMessage();
+                } catch (OutOfMemoryError e) {
+                    frame = null;
+                    why = "too large to decode";
                 }
                 synchronized (queue) {
                     if (closed) {
@@ -173,6 +181,17 @@ public final class Reel implements AutoCloseable {
             }
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
+        } catch (Error e) {
+            // The decoder itself has gone: finished, and said, so whoever plays this is not left waiting on a thread
+            // that is no longer there.
+            synchronized (queue) {
+                ended = true;
+                dead = true;
+                seekTo = -1;
+                failure = e.toString();
+                queue.notifyAll();
+            }
+            LOG.warn("{} stopped decoding: {}", clip.stamp().path(), e.toString());
         } finally {
             clip.close();
         }

@@ -110,8 +110,12 @@ public final class Movie implements Playable {
         byte[] bytes = Files.readAllBytes(motion.stamp().path());
         Animation a = Imagelib.animate(bytes);
         try {
+            if (a.count() == 0) {
+                // Changed since its poster was made, or never had any: nothing would ever come to show.
+                throw new ImageException("the file has no frames");
+            }
             return new Movie(motion.stamp(), a, side, budget);
-        } catch (RuntimeException e) {
+        } catch (RuntimeException | Error e) {
             a.close();
             throw e;
         }
@@ -126,9 +130,13 @@ public final class Movie implements Playable {
         return new Motion(stamp, a.count(), ms, a.loops());
     }
 
-    /** A {@code w x h} frame's size scaled down, never up, to {@code side} on its long side, and to what a GPU holds. */
+    /**
+     * A {@code w x h} frame's size scaled down, never up, to {@code side} on its long side (0 or less: its own), and to
+     * what a GPU holds.
+     */
     public static int[] fitted(int w, int h, int side) {
-        double scale = Math.min(1d, (double) Math.min(side, Picture.SHEET_SIDE) / Math.max(1, Math.max(w, h)));
+        int most = side > 0 ? Math.min(side, Picture.SHEET_SIDE) : Picture.SHEET_SIDE;
+        double scale = Math.min(1d, (double) most / Math.max(1, Math.max(w, h)));
         return new int[] {Math.max(1, (int) Math.round(w * scale)), Math.max(1, (int) Math.round(h * scale))};
     }
 
@@ -314,6 +322,10 @@ public final class Movie implements Playable {
             }
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
+        } catch (Error e) {
+            // The decoder itself has gone (its native library, the stack): nothing more is made, and whoever plays
+            // this is told so, rather than waiting on a thread that is no longer there.
+            ended(0, e.toString());
         } finally {
             animation.close();
         }
@@ -324,13 +336,17 @@ public final class Movie implements Playable {
      * A frame passed on the way that nobody wants is decoded, since the next is drawn over it, but not scaled or kept.
      */
     private void walkTo(int target) {
+        // The frame being made, where a failure ends the file: not the one after it, which would be wanted, made and
+        // failed again for ever.
+        int at = target;
         try {
             if (animation.index() >= target) {
                 animation.rewind();
             }
             while (animation.index() < target) {
+                at = animation.index() + 1;
                 if (!animation.next()) {
-                    ended(animation.index() + 1, null);
+                    ended(at, null);
                     return;
                 }
                 int k = animation.index();
@@ -347,10 +363,11 @@ public final class Movie implements Playable {
                     keep(k, MipChain.of(level0, width, height));
                 }
             }
-        } catch (ImageException e) {
-            ended(animation.index() + 1, e.getMessage());
+        } catch (RuntimeException e) {
+            // A damaged frame (ImageException), or anything else decoding or scaling it threw: the thread goes on.
+            ended(at, e.getMessage() == null ? e.toString() : e.getMessage());
         } catch (OutOfMemoryError e) {
-            ended(animation.index() + 1, "too large to decode");
+            ended(at, "too large to decode");
         }
     }
 
@@ -383,6 +400,9 @@ public final class Movie implements Playable {
         synchronized (lock) {
             if (at < frames) {
                 frames = Math.max(0, at);
+                if (why == null && frames == 0) {
+                    why = "no frames to show";   // ended before the first: a reason, or the player is left guessing
+                }
                 if (why != null) {
                     failure = why;
                     LOG.warn("{} stopped decoding at frame {}: {}", stamp.path(), at, why);

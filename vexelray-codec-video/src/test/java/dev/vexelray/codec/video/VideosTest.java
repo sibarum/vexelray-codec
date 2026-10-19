@@ -140,6 +140,60 @@ class VideosTest {
         assertEquals("not a video", d.identity());
     }
 
+    @Test
+    void aVideoCutShortIsAReasonNotAnException() throws IOException {
+        for (String name : new String[] {"rgb.mp4", "rgb.webm"}) {
+            for (int keep : new int[] {0, 16, 400, 2_000}) {
+                Path cut = Fixtures.cut(name, keep);
+                Opened o = Videos.open(cut, 0);
+                if (o.video()) {
+                    o.clip().close();
+                }
+                Decoded poster = Videos.poster(cut, 0, true);
+                Decoded slides = Videos.slides(cut, 4, 32, 500);
+                assertFalse(poster.identity().isEmpty(), name + " cut to " + keep);
+                assertFalse(slides.identity().isEmpty(), name + " cut to " + keep);
+            }
+        }
+        assertEquals("not a video", Videos.open(Fixtures.cut("rgb.mp4", 0), 0).identity(), "an empty file");
+        assertEquals("a damaged video", Videos.open(Fixtures.cut("rgb.mp4", 2_000), 0).identity(), "an MP4 cut short");
+        assertEquals("a damaged video", Videos.poster(Fixtures.cut("rgb.webm", 400), 0).identity());
+    }
+
+    @Test
+    void aVideoWithNoFramesIsAReason() throws IOException {
+        Path header = Fixtures.noFrames();
+        assertTrue(Videos.open(header, 0).video(), "it opens");
+        Decoded poster = Videos.poster(header, 0, true);
+        assertFalse(poster.image());
+        assertFalse(poster.identity().isEmpty());
+        assertFalse(Videos.slides(header, 3, 32, 500).image());
+    }
+
+    @Test
+    void noSlidesAskedForIsAReason() throws IOException {
+        Path file = Fixtures.file("rgb.webm");
+        assertEquals("no slides asked for", Videos.slides(file, 0, 32, 500).identity());
+        assertEquals("no slides asked for", Videos.slides(file, 3, 32, 0).identity());
+    }
+
+    @Test
+    void aDamagedContainerIsNotCalledSomethingElse() {
+        byte[] text = "plain text, called .mp4".getBytes(java.nio.charset.StandardCharsets.US_ASCII);
+        byte[] mp4 = {0, 0, 0, 0x20, 'f', 't', 'y', 'p', 'i', 's', 'o', 'm'};
+        byte[] webm = {0x1A, 0x45, (byte) 0xDF, (byte) 0xA3, 0};
+        String moov = "could not open x: could not open the file: Invalid data found when processing input "
+                + "(moov atom not found)";
+        assertEquals("not a video", Videos.unopened(moov, text), "FFmpeg says the same of both");
+        assertEquals("a damaged video", Videos.unopened(moov, mp4));
+        assertEquals("a damaged video", Videos.unopened("could not open the file: End of file", webm));
+        assertEquals("a damaged video", Videos.unopened("could not open x: could not read the streams", text));
+        assertEquals("no decoder for its video", Videos.unopened("could not open x: no decoder for the video stream",
+                mp4));
+        assertEquals("not a video", Videos.unopened("could not open x: no video stream", mp4), "sound alone");
+        assertEquals("not a video", Videos.unopened(null, new byte[0]));
+    }
+
     /** Frame {@code k} of {@code p}'s sheet, on its own. */
     private static byte[] cell(Picture p, int k) {
         int fw = p.frameWidth();

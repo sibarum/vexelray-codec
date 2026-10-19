@@ -117,6 +117,20 @@ class VideoViewTest {
     }
 
     @Test
+    void aLoopOfAVideoWithNoFramesEndsRatherThanSpinning() throws Exception {
+        AtomicInteger ends = new AtomicInteger();
+        view.loop(true).onEnd(ends::incrementAndGet);
+        var o = Videos.open(Fixtures.noFrames(), 0);
+        assertTrue(o.video(), o.identity());
+        view.play(o.clip());
+        until(() -> ends.get() == 1, "the end is reached");
+        assertFalse(view.playing());
+        run(300);
+        assertEquals(1, ends.get(), "said once, not looped round for ever");
+        assertEquals(-1, view.shownMicros());
+    }
+
+    @Test
     void clearingLetsGoOfTheClip() throws Exception {
         var clip = Videos.open(Fixtures.file("rgb.webm"), 0).clip();
         view.play(clip);

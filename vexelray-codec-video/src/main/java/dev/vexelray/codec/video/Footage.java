@@ -6,7 +6,6 @@ import dev.vexelray.codec.image.Playable;
 import dev.vexelray.vulkan.present.MipChain;
 import sibarum.ffmpeg.Frame;
 import sibarum.ffmpeg.Video;
-import sibarum.ffmpeg.VideoException;
 import sibarum.ffmpeg.VideoInfo;
 import sibarum.probe.Log;
 
@@ -143,8 +142,18 @@ public final class Footage implements Playable {
             o.clip().close();
             throw new IOException("a video with no length or rate");
         }
-        Sound sound = o.clip().info().audio() ? Sound.open(motion.stamp().path()) : null;
-        return new Footage(o.clip(), sound);
+        Sound sound = null;
+        try {
+            sound = o.clip().info().audio() ? Sound.open(motion.stamp().path()) : null;
+            return new Footage(o.clip(), sound);
+        } catch (RuntimeException | Error e) {
+            // No thread to decode on, say: what was opened for it is closed, not left open with nobody to close it.
+            if (sound != null) {
+                sound.close();
+            }
+            o.clip().close();
+            throw e;
+        }
     }
 
     /** The sound, as the clock the frames keep time by; null when it plays silently. */
@@ -312,6 +321,10 @@ public final class Footage implements Playable {
             }
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
+        } catch (Error e) {
+            // The decoder itself has gone (its native library, the stack): nothing more is made, and whoever plays
+            // this is told so, rather than waiting on a thread that is no longer there.
+            ended(0, e.toString());
         } finally {
             clip.close();
         }
@@ -375,8 +388,9 @@ public final class Footage implements Playable {
                     return;   // past the window: what it wanted is made, or the stream skipped it and it is covered
                 }
             }
-        } catch (VideoException e) {
-            ended(target, e.getMessage());
+        } catch (RuntimeException e) {
+            // A damaged stream (VideoException), or anything else decoding or scaling it threw: the thread goes on.
+            ended(target, e.getMessage() == null ? e.toString() : e.getMessage());
             heldAt = -1;
         } catch (OutOfMemoryError e) {
             ended(target, "too large to decode");
@@ -443,6 +457,9 @@ public final class Footage implements Playable {
         synchronized (lock) {
             if (at < frames) {
                 frames = Math.max(0, at);
+                if (why == null && frames == 0) {
+                    why = "no frames to show";   // ended before the first: a reason, or the player is left guessing
+                }
                 if (why != null) {
                     failure = why;
                     LOG.warn("{} stopped decoding at frame {}: {}", clip.stamp().path(), at, why);

@@ -17,6 +17,7 @@ import dev.vexelray.gui.krono.KronoGui;
 import dev.vexelray.gui.widget.TitleBar;
 import sibarum.tactroller.api.Key;
 
+import java.nio.file.InvalidPathException;
 import java.nio.file.Path;
 import java.util.Locale;
 
@@ -86,7 +87,15 @@ final class Recipes {
     AutoCloseable playing(Textures.Binding textures, Screen screen, Gui gui, Launch launch) {
         VideoView view = screen.view();
         if (!launch.rest().isEmpty()) {
-            Path path = Path.of(launch.rest().getFirst());
+            Path path;
+            try {
+                path = Path.of(launch.rest().getFirst());
+            } catch (InvalidPathException e) {
+                // Said in the window, as any file that will not play is, rather than stopping it opening.
+                opened = "not a file name: " + launch.rest().getFirst();
+                screen.state().text(described(view));
+                return view::clear;
+            }
             gui.offload().execute(() -> {
                 Opened o = Videos.open(path, Player.SIDE);
                 if (o.video()) {
@@ -100,7 +109,8 @@ final class Recipes {
     }
 
     private static String described(VideoView view) {
-        return opened + " · " + (view.playing() ? "playing" : "paused");
+        String failure = view.failure();
+        return opened + " · " + (failure != null ? failure : view.playing() ? "playing" : "paused");
     }
 
     /**

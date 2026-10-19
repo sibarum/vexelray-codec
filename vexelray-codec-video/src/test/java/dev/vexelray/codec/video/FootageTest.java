@@ -14,6 +14,7 @@ import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
@@ -105,6 +106,34 @@ class FootageTest {
             assertEquals(32, footage.width());
             assertEquals(24, footage.height());
         }
+    }
+
+    @Test
+    void footageWithNoFramesEndsWithAReason() throws Exception {
+        Clip clip = Videos.open(Fixtures.noFrames(), 0).clip();
+        assertNotNull(clip);
+        if (!Footage.plays(clip.info())) {
+            clip.close();
+            return;   // a header that does not say its length cannot be played by number at all, which is also right
+        }
+        try (Footage f = new Footage(clip)) {
+            f.want(0, true);
+            long end = System.currentTimeMillis() + DEADLINE_MS;
+            while (f.count() > 0 && System.currentTimeMillis() < end) {
+                Thread.sleep(1);
+            }
+            assertEquals(0, f.count());
+            // Its own seek fails on a file cut so short, or the stream ends at once: a reason either way.
+            assertNotNull(f.failure());
+        }
+    }
+
+    @Test
+    void aFileGoneSinceItsPosterDoesNotOpenAndLeavesNothingOpen() throws Exception {
+        Path file = Fixtures.file("rgb.mp4");
+        Motion m = Videos.poster(file, 0, true).picture().motion();
+        java.nio.file.Files.delete(file);
+        assertThrows(java.io.IOException.class, () -> m.open(32).close());
     }
 
     @Test

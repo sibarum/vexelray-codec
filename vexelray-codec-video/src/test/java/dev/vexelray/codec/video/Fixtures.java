@@ -22,6 +22,31 @@ public final class Fixtures {
         return out;
     }
 
+    /** {@code name}'s first {@code keep} bytes, as a file: a download cut short. */
+    public static Path cut(String name, int keep) throws IOException {
+        Path out = Files.createTempFile("fixture-cut", "-" + name);
+        out.toFile().deleteOnExit();
+        try (InputStream in = Fixtures.class.getResourceAsStream("/" + name)) {
+            Files.write(out, in.readNBytes(keep));
+        }
+        return out;
+    }
+
+    /** {@code rgb.webm} cut just into its first cluster: it opens, says what is coming, and has not one frame. */
+    public static Path noFrames() throws IOException {
+        byte[] webm;
+        try (InputStream in = Fixtures.class.getResourceAsStream("/rgb.webm")) {
+            webm = in.readAllBytes();
+        }
+        for (int i = 0; i + 4 <= webm.length; i++) {
+            if ((webm[i] & 0xFF) == 0x1F && (webm[i + 1] & 0xFF) == 0x43 && (webm[i + 2] & 0xFF) == 0xB6
+                    && (webm[i + 3] & 0xFF) == 0x75) {
+                return cut("rgb.webm", i + 5);   // the cluster begun, and none of it there
+            }
+        }
+        throw new IllegalStateException("rgb.webm has no cluster");
+    }
+
     /** Whether the centre of a {@code w x h} RGBA8 frame is mostly channel {@code c}: 0 red, 1 green, 2 blue. */
     public static boolean dominant(byte[] rgba, int w, int h, int c) {
         int p = ((h / 2) * w + w / 2) * 4;

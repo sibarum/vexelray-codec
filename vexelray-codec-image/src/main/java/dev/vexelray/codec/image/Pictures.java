@@ -187,8 +187,8 @@ public final class Pictures {
                 Imagelib.Size intrinsic = Imagelib.svgSize(bytes);
                 int w = Math.round(intrinsic.width());
                 int h = Math.round(intrinsic.height());
-                // Rasterised once, at the largest size asked for; the others are shrinks of it.
-                int side = sides.length == 0 ? Math.max(1, Math.max(w, h)) : largest(sides);
+                // Rasterised once, at the largest size asked for; the others are shrinks of it. No size, or 0, is its own.
+                int side = largest(sides, Math.max(1, Math.max(w, h)));
                 int[] box = vectorBox(intrinsic.width(), intrinsic.height(), Math.min(side, Picture.SHEET_SIDE));
                 Frames frames = Imagelib.rasterize(bytes, box[0], box[1]);
                 for (int s : sides(sides)) {
@@ -223,10 +223,14 @@ public final class Pictures {
         return sides.length == 0 ? new int[] {Picture.SHEET_SIDE} : sides;
     }
 
-    private static int largest(int[] sides) {
+    /** The largest of {@code sides}, any of 0 or less, or none at all, standing for {@code own}. */
+    private static int largest(int[] sides, int own) {
+        if (sides.length == 0) {
+            return own;
+        }
         int max = 1;
         for (int s : sides) {
-            max = Math.max(max, s);
+            max = Math.max(max, s > 0 ? s : own);
         }
         return max;
     }

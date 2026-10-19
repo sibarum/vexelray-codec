@@ -75,6 +75,19 @@ class VideoGlimpsesTest {
     }
 
     @Test
+    void aCallerThatThrowsDoesNotStopTheGlimpses() throws Exception {
+        try (Glimpses g = motion().glimpses(32)) {
+            BlockingQueue<Boolean> asked = new ArrayBlockingQueue<>(1);
+            g.want(2500, p -> {
+                asked.offer(true);
+                throw new IllegalStateException("the caller's own bug");
+            });
+            assertNotNull(asked.poll(DEADLINE_MS, TimeUnit.MILLISECONDS));
+            assertColour(g, 400, 0);
+        }
+    }
+
+    @Test
     void closingStopsTheThread() throws Exception {
         VideoGlimpses g = (VideoGlimpses) motion().glimpses(32);
         await(g, 0);
