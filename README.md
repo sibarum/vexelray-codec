@@ -43,6 +43,9 @@ dev.vexelray.codec.image        pixels, and no GUI type. Blocking: run on Gui.of
   Playable                      frames by number, each with its time, made ahead on a thread of their own: what a
                                 Playback plays. Movie is one; vexelray-codec-video's Footage is another. One may keep
                                 a Clock of its own (a video's sound), which Playback then keeps time by.
+  Glimpses                      single frames of a file that plays, by time, from a file of their own, the latest ask
+                                winning: what a timeline shows under the pointer. Motion.glimpses opens them, for a
+                                Source that has them (a video's; an animation's has none).
   Movie                         a file that plays, made a frame at a time on its own thread, each scaled and given
                                 its mip chain there; the frames made kept within a budget, so seeking back is cheap.
   Original                      a still at its own full size, any part of which is made at any size: a raster
@@ -113,6 +116,8 @@ dev.vexelray.codec.video        frames, and no GUI type. Videos blocks: run it o
                                 on its own thread, a few ahead and the rest kept within a budget; forward by decoding,
                                 anywhere else by an exact seek. What plays a video on an ImageView. Opens the
                                 file's sound too, when there is one and a speaker, and gives it as its Clock.
+  VideoGlimpses                 a video's Glimpses: the file opened again, small, its frames made by number on a thread
+                                of their own; forward by decoding, anywhere else by an exact seek; the last 64 kept.
   Sound                         (package-private) the sound as that Clock: the time being heard, and by the wall
                                 past the sound's end; its volume.
 

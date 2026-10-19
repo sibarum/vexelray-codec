@@ -23,6 +23,14 @@ public record Motion(Stamp stamp, int frames, long durationMillis, int loops, So
     @FunctionalInterface
     public interface Source {
         Playable open(Motion motion, int side) throws IOException;
+
+        /**
+         * The file's frames one at a time by time, at most {@code side} on their long side, from a file of their own:
+         * what a timeline shows under the pointer. Null, the default, for a source that has none.
+         */
+        default Glimpses glimpses(Motion motion, int side) throws IOException {
+            return null;
+        }
     }
 
     /** An animated GIF, WebP or APNG, played by a {@link Movie}. One instance, so two motions of a file are equal. */
@@ -40,5 +48,14 @@ public record Motion(Stamp stamp, int frames, long durationMillis, int loops, So
      */
     public Playable open(int side) throws IOException {
         return source.open(this, side);
+    }
+
+    /**
+     * Its frames one at a time by time ({@link Glimpses}), at most {@code side} on their long side; null if its source
+     * has none, as an animated image's has not. Blocking: run it on {@code Gui.offload()}. The caller closes what it
+     * gets.
+     */
+    public Glimpses glimpses(int side) throws IOException {
+        return source.glimpses(this, side);
     }
 }

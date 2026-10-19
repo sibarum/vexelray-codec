@@ -1,5 +1,6 @@
 package dev.vexelray.codec.video;
 
+import dev.vexelray.codec.image.Glimpses;
 import dev.vexelray.codec.image.Motion;
 import dev.vexelray.codec.image.Playable;
 import dev.vexelray.vulkan.present.MipChain;
@@ -49,8 +50,26 @@ public final class Footage implements Playable {
     /** How far ahead of the decoder a frame is decoded up to rather than sought. */
     static final double RUN_SECONDS = 2;
 
-    /** What a video's poster carries as its motion: one instance, so two posters of a file are equal. */
-    public static final Motion.Source SOURCE = Footage::open;
+    /**
+     * What a video's poster carries as its motion: one instance, so two posters of a file are equal. It plays the file
+     * as {@code Footage}, and glimpses it as {@link VideoGlimpses}.
+     */
+    public static final Motion.Source SOURCE = new Motion.Source() {
+        @Override
+        public Playable open(Motion motion, int side) throws IOException {
+            return Footage.open(motion, side);
+        }
+
+        @Override
+        public Glimpses glimpses(Motion motion, int side) throws IOException {
+            return VideoGlimpses.open(motion, side);
+        }
+
+        @Override
+        public String toString() {
+            return "Footage.SOURCE";
+        }
+    };
 
     private static final Log LOG = Log.of("codec.video");
 
