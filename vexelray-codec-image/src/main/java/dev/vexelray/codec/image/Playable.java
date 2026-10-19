@@ -69,6 +69,13 @@ public interface Playable extends AutoCloseable {
 
         /** Put it at {@code ms} into a pass, running or stopped as it was. */
         void seek(long ms);
+
+        /**
+         * How loud what it keeps time by is heard, from 0 (silent) to 1 (as the file has it), running or stopped.
+         * Silence does not stop it: the time is still kept. Nothing, for a clock with nothing to hear.
+         */
+        default void volume(float volume) {
+        }
     }
 
     /** Stop decoding and close the file. Closing twice does nothing. */

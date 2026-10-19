@@ -17,6 +17,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.BooleanSupplier;
+import java.util.function.Consumer;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -35,6 +36,7 @@ class PlaybackTest {
             r.until(() -> r.play.frame() == 0);
             assertTrue(r.play.playing());
             assertTrue(r.play.loop(), "looping until told otherwise");
+            assertFalse(r.play.sounds(), "a GIF has nothing to hear");
             r.until(() -> r.play.frame() == 2);
             r.until(() -> r.play.frame() == 0);
             assertTrue(r.play.playing(), "the end is the start again");
@@ -122,7 +124,9 @@ class PlaybackTest {
             int before = r.changes.get();
             r.play.pause();
             r.play.loop(false);
-            assertEquals(before + 2, r.changes.get());
+            r.play.volume(0.5f);
+            r.play.muted(true);
+            assertEquals(before + 4, r.changes.get());
         }
     }
 
@@ -201,6 +205,42 @@ class PlaybackTest {
         }
     }
 
+    @Test
+    void theVolumeAndTheMuteGoToTheOwnClockWhichKeepsTimeSilenced(@TempDir Path dir) throws IOException {
+        FakeClock own = new FakeClock();
+        try (Rig r = new Rig(dir, own)) {
+            r.until(() -> own.running);
+            assertTrue(r.play.sounds());
+            assertEquals(1f, own.volume, "as the file has it, until told otherwise");
+            r.play.volume(0.4f);
+            assertEquals(0.4f, own.volume);
+            r.play.muted(true);
+            assertEquals(0f, own.volume, "muted is silent");
+            assertTrue(own.running, "and still keeps time");
+            r.play.volume(0.7f);
+            assertEquals(0f, own.volume, "a level given while muted is kept, not heard");
+            assertEquals(0.7f, r.play.volume());
+            r.play.muted(false);
+            assertEquals(0.7f, own.volume);
+            r.play.volume(3f);
+            assertEquals(1f, r.play.volume(), "no louder than the file");
+        }
+    }
+
+    @Test
+    void aVolumeGivenBeforeTheFileOpensIsHeardOnceItHas(@TempDir Path dir) throws IOException {
+        FakeClock own = new FakeClock();
+        try (Rig r = new Rig(dir, own, p -> {
+            p.volume(0.25f);
+            p.muted(true);
+        })) {
+            r.until(() -> own.running);
+            assertEquals(0f, own.volume);
+            r.play.muted(false);
+            assertEquals(0.25f, own.volume);
+        }
+    }
+
     /** A clock the test sets, and what was asked of it. */
     private static final class FakeClock implements Playable.Clock {
         volatile long now;
@@ -208,6 +248,7 @@ class PlaybackTest {
         /** Start and stop take a while, as a sound device's do. */
         volatile boolean slow;
         final AtomicInteger seeks = new AtomicInteger();
+        volatile float volume = 1f;
 
         @Override
         public long now() {
@@ -230,6 +271,11 @@ class PlaybackTest {
         public void seek(long ms) {
             now = ms;
             seeks.incrementAndGet();
+        }
+
+        @Override
+        public void volume(float volume) {
+            this.volume = volume;
         }
     }
 
@@ -262,6 +308,11 @@ class PlaybackTest {
 
         /** With {@code own} not null, the movie keeps that clock. */
         Rig(Path dir, Playable.Clock own) throws IOException {
+            this(dir, own, p -> { });
+        }
+
+        /** With {@code before} done to the playback before it opens the file. */
+        Rig(Path dir, Playable.Clock own, Consumer<Playback> before) throws IOException {
             Path gif = dir.resolve("anim3.gif");
             try (InputStream in = PlaybackTest.class.getResourceAsStream("/anim3.gif")) {
                 Files.copy(in, gif);
@@ -272,6 +323,7 @@ class PlaybackTest {
                         (motion, side) -> new Clocked(Motion.ANIMATION.open(motion, side), own), false);
             }
             play = new Playback(krono, new Textures(), (frame, w, h) -> { }, m, 1024, changes::incrementAndGet);
+            before.accept(play);
             play.start(Runnable::run);
         }
 

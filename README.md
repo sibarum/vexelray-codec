@@ -60,8 +60,9 @@ dev.vexelray.codec.image.gui    on vexelray-gui.
                                 the side it came from, over a backdrop (dark, light, checker, magenta, green) for its
                                 transparent pixels, and posed by its caller: zoomed, moved and turned (Pose), as
                                 visual transforms.
-  Playback                      how a picture that plays is played: play, pause, seek, step, loop; paced by krono,
-                                its frames streamed through a GuiApp.stream, and held while the window is unfocused.
+  Playback                      how a picture that plays is played: play, pause, seek, step, loop, volume and mute;
+                                paced by krono, its frames streamed through a GuiApp.stream, and held while the window
+                                is unfocused.
   ImageStarter                  for a framework application: Textures, bound to the window and unbound at shutdown.
 ```
 
@@ -113,7 +114,7 @@ dev.vexelray.codec.video        frames, and no GUI type. Videos blocks: run it o
                                 anywhere else by an exact seek. What plays a video on an ImageView. Opens the
                                 file's sound too, when there is one and a speaker, and gives it as its Clock.
   Sound                         (package-private) the sound as that Clock: the time being heard, and by the wall
-                                past the sound's end.
+                                past the sound's end; its volume.
 
 dev.vexelray.codec.video.gui    on vexelray-gui.
   VideoView                     one clip on a node, fitted and enlarged to its stage, paced by a krono shred: play,
@@ -161,6 +162,13 @@ pictures. Where the sound ends before the pictures, or the device is lost, the c
 sound, or a machine with no sound device, plays silently on `Playback`'s own clock, as before. The system property
 `vexelray.sound` says where sound goes: `speakers` (the default), `nowhere` (played in real time to no device, the
 clock and all: what the build's tests use, so a test run is quiet), or `off`. `VideoView` plays pictures only.
+
+**How loud.** `Playback.volume` (0 to 1, the file's own level by default) and `Playback.muted` set how loud the sound is
+heard, through `Playable.Clock.volume` (nothing, for a clock with nothing to hear) to `Audio.volume`; muted, the clock
+keeps time all the same. Both are kept while the file is still opening and given to the sound once it is, and
+`Playback.sounds` says whether there is any to hear, which is what a volume control is shown for. `ImageView.volume`
+and `ImageView.muted` give them to the picture playing and to every one shown after it, so a viewer keeps its level
+from one video to the next.
 
 Not yet: the display matrix's **rotation** (phone video shot upright plays on its side), and a **native image**
 (FFmpeg is shared libraries, so they would ship beside the executable). See `ffmpeg-wrapper`'s README.

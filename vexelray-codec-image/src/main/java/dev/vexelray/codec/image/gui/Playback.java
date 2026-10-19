@@ -38,9 +38,12 @@ import java.util.concurrent.atomic.AtomicInteger;
  * until it is let go, when it plays on if it was playing. A view holds its pictures while its window is not focused.
  * A pause of the viewer's own is not undone by letting go.
  *
+ * <p><b>Its sound has a {@link #volume} and can be {@link #muted}</b>, kept while the file is still opening and given
+ * to the sound once it is, and again whenever either changes. Silence is only silence: the clock keeps time as before.
+ *
  * <p>Plays as soon as it opens, round and round: {@link #loop} is on until it is turned off. Every method may be
  * called from any thread; {@code changed} is told on the timeline or the GUI thread whenever what a transport bar
- * shows has moved: the frame, the clock's state, the loop.
+ * shows has moved: the frame, the clock's state, the loop, the volume and the mute.
  */
 public final class Playback {
 
@@ -78,6 +81,9 @@ public final class Playback {
     private boolean loop = true;
     private boolean closed;
     private String failure;
+    /** How loud the sound is, and whether it is silenced: given to the movie's clock whenever it has one. */
+    private float volume = 1f;
+    private boolean muted;
     /** A frame on its way to the GPU, and the newest one due since, which goes next. */
     private boolean inFlight;
     private byte[][] pending;
@@ -115,6 +121,7 @@ public final class Playback {
                     return;
                 }
                 movie = m;
+                sound();
             }
             boolean windowed = textures.stream(m.width(), m.height(), s -> {
                 synchronized (this) {
@@ -247,6 +254,40 @@ public final class Playback {
         return loop;
     }
 
+    /**
+     * How loud its sound is heard, from 0 to 1 (as the file has it, the default); a video's, a picture with no sound
+     * keeping it for nothing. Kept, muted or not, and given to the sound whenever the file is opened.
+     */
+    public void volume(float volume) {
+        synchronized (this) {
+            this.volume = Math.max(0f, Math.min(1f, volume));
+            sound();
+        }
+        changed.run();
+    }
+
+    public synchronized float volume() {
+        return volume;
+    }
+
+    /** Silence the sound ({@code true}) or let it be heard at its {@link #volume}. The clock keeps time either way. */
+    public void muted(boolean muted) {
+        synchronized (this) {
+            this.muted = muted;
+            sound();
+        }
+        changed.run();
+    }
+
+    public synchronized boolean muted() {
+        return muted;
+    }
+
+    /** Whether there is sound to hear: a video with sound, once its file is open. What a volume control is shown for. */
+    public synchronized boolean sounds() {
+        return movie != null && movie.clock() != null;
+    }
+
     /** How far into a pass the clock is, in ms. */
     public long position() {
         return position;
@@ -321,6 +362,14 @@ public final class Playback {
         Playable.Clock own = movie == null ? null : movie.clock();
         if (own != null) {
             own.run(false);
+        }
+    }
+
+    /** Tell the movie's clock how loud to be, if there is a movie and it keeps one. Under this. */
+    private void sound() {
+        Playable.Clock own = movie == null ? null : movie.clock();
+        if (own != null) {
+            own.volume(muted ? 0f : volume);
         }
     }
 

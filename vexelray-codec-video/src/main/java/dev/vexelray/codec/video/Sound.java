@@ -132,6 +132,18 @@ final class Sound implements Playable.Clock {
         }
     }
 
+    @Override
+    public synchronized void volume(float volume) {
+        if (closed || lost) {
+            return;
+        }
+        try {
+            audio.volume(Math.max(0f, Math.min(1f, volume)));
+        } catch (VideoException e) {
+            lose(e);
+        }
+    }
+
     /** Stop the sound and give the device back. Closing twice does nothing. */
     synchronized void close() {
         if (closed) {

@@ -166,6 +166,9 @@ public final class ImageView {
     private volatile Runnable onPlayback = () -> { };
     /** Whether the window is focused: pictures that play are held while it is not. */
     private volatile boolean focused = true;
+    /** How loud a picture that plays is heard, and whether it is silenced: every one shown, until told otherwise. */
+    private volatile float volume = 1f;
+    private volatile boolean muted;
 
     public ImageView(Gui gui, KronoGui krono, Textures textures, Length padY, Length padX) {
         this.gui = gui;
@@ -269,6 +272,35 @@ public final class ImageView {
      */
     public synchronized Playback playback() {
         return front.playback;
+    }
+
+    /**
+     * How loud pictures that play are heard, from 0 to 1 (the default): the one playing now, and every one shown after
+     * it, so a viewer stepping from one video to the next keeps the level it was given.
+     */
+    public void volume(float volume) {
+        this.volume = Math.max(0f, Math.min(1f, volume));
+        synchronized (this) {
+            front.sound();
+            back.sound();
+        }
+    }
+
+    public float volume() {
+        return volume;
+    }
+
+    /** Silence pictures that play, or let them be heard at the {@link #volume}: now, and every one shown after. */
+    public void muted(boolean muted) {
+        this.muted = muted;
+        synchronized (this) {
+            front.sound();
+            back.sound();
+        }
+    }
+
+    public boolean muted() {
+        return muted;
     }
 
     /**
@@ -553,6 +585,7 @@ public final class ImageView {
                     }
                 }, p.motion(), side, () -> onPlayback.run());
                 playback.hold(!focused);
+                sound();
                 playback.start(gui.offload());
                 return;
             }
@@ -601,6 +634,14 @@ public final class ImageView {
             }
             return new ImageRegion(at.mirrorX() ? r.u1() : r.u0(), at.mirrorY() ? r.v1() : r.v0(),
                     at.mirrorX() ? r.u0() : r.u1(), at.mirrorY() ? r.v0() : r.v1());
+        }
+
+        /** Give the picture's playing the view's volume and mute. */
+        void sound() {
+            if (playback != null) {
+                playback.volume(volume);
+                playback.muted(muted);
+            }
         }
 
         /** Hold the picture's playing, or let it go: for a window that is not focused. */
