@@ -8,6 +8,8 @@ import org.junit.jupiter.api.Test;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayList;
+import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -101,6 +103,24 @@ class VideosTest {
         for (int k = 0; k < 3; k++) {
             assertTrue(Fixtures.dominant(cell(p, k), 32, 24, k), "frame " + k);
         }
+    }
+
+    @Test
+    void theFirstFrameIsHandedOverBeforeTheRest() throws IOException {
+        Path file = Fixtures.file("rgb.mp4");
+        List<Picture> early = new ArrayList<>();
+        List<String> said = new ArrayList<>();
+        Decoded d = Videos.slides(file, 3, 32, 700, (identity, p) -> {
+            said.add(identity);
+            early.add(p);
+        });
+        assertEquals(1, early.size(), "once");
+        assertEquals(List.of(d.identity()), said);
+        Picture still = early.get(0);
+        assertFalse(still.animated());
+        assertEquals(Stamp.of(file), still.key());
+        assertTrue(Fixtures.dominant(still.sheet(), 32, 24, 0), "the red second, as the slideshow starts");
+        assertEquals(3, d.picture().count());
     }
 
     @Test

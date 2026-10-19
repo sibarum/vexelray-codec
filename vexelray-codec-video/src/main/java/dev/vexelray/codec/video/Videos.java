@@ -18,6 +18,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 import java.util.Set;
+import java.util.function.BiConsumer;
 
 /**
  * Videos from files: anything FFmpeg decodes (H.264, HEVC, VP9, AV1 and the rest, in MP4, MKV, WebM, MOV and the rest),
@@ -180,6 +181,15 @@ public final class Videos {
      * frames asked for decodes. A frame that will not decode is left out rather than failing the rest.
      */
     public static Decoded slides(Path path, int count, int side, int millis) {
+        return slides(path, count, side, millis, (identity, first) -> { });
+    }
+
+    /**
+     * {@link #slides(Path, int, int, int)}, handing {@code first} the first frame that decodes, as a still, the moment
+     * it does, with what the file is: something to show while the rest are found, which in a long HD video is most of
+     * the wait. Called at most once, on the calling thread, and not at all for a slideshow of one frame.
+     */
+    public static Decoded slides(Path path, int count, int side, int millis, BiConsumer<String, Picture> first) {
         if (count < 1 || millis < 1) {
             throw new IllegalArgumentException("count " + count + ", millis " + millis);
         }
@@ -201,6 +211,9 @@ public final class Videos {
                         Frame f = video.next();
                         if (f != null) {
                             frames.add(f);
+                            if (frames.size() == 1 && count > 1) {
+                                first.accept(opened.identity(), sheet(clip.stamp(), frames, millis, info));
+                            }
                         }
                     } catch (VideoException e) {
                         LOG.debug("{} gave no frame {} of {}: {}", path, k, count, e.getMessage());
