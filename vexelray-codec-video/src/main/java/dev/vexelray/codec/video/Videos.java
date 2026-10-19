@@ -14,6 +14,7 @@ import sibarum.probe.Log;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 import java.util.Set;
@@ -166,6 +167,83 @@ public final class Videos {
             LOG.warn("{} is too large to decode", path);
             return Decoded.none(path, "too large to decode");
         }
+    }
+
+    /**
+     * {@code count} frames from across {@code path} as a picture that steps through them, {@code millis} each, as an
+     * animated GIF does: a slideshow of the video for a preview, where playing it would be too much. The frames are
+     * taken from the middle of {@code count} equal parts, so neither the fade up from black nor the credits, and
+     * packed into one sheet at most {@code side} on a frame's long side, smaller if the sheet would not fit
+     * {@link Picture#SHEET_SIDE}. Keyed by the file's {@link Stamp}, as a poster is.
+     *
+     * <p>A video that does not say how long it is gives its first frame, a still; so does one where only one of the
+     * frames asked for decodes. A frame that will not decode is left out rather than failing the rest.
+     */
+    public static Decoded slides(Path path, int count, int side, int millis) {
+        if (count < 1 || millis < 1) {
+            throw new IllegalArgumentException("count " + count + ", millis " + millis);
+        }
+        int columns = (int) Math.ceil(Math.sqrt(count));
+        int rows = (count + columns - 1) / columns;
+        int fits = Picture.SHEET_SIDE / Math.max(columns, rows);
+        Opened opened = open(path, side <= 0 ? fits : Math.min(side, fits));
+        if (!opened.video()) {
+            return Decoded.none(path, opened.identity());
+        }
+        try (Clip clip = opened.clip()) {
+            Video video = clip.video();
+            VideoInfo info = video.info();
+            List<Frame> frames = new ArrayList<>(count);
+            if (info.timed() && info.durationMicros() > 0) {
+                for (int k = 0; k < count; k++) {
+                    try {
+                        video.seek((long) (info.durationMicros() * (k + 0.5) / count));
+                        Frame f = video.next();
+                        if (f != null) {
+                            frames.add(f);
+                        }
+                    } catch (VideoException e) {
+                        LOG.debug("{} gave no frame {} of {}: {}", path, k, count, e.getMessage());
+                    }
+                }
+            }
+            if (frames.isEmpty()) {
+                video.seek(0);
+                Frame f = video.next();
+                if (f == null) {
+                    return Decoded.none(path, "a video with no frames");
+                }
+                frames.add(f);
+            }
+            return new Decoded(path, opened.identity(), List.of(sheet(clip.stamp(), frames, millis, info)));
+        } catch (VideoException e) {
+            return Decoded.none(path, "does not decode as a video");
+        } catch (OutOfMemoryError e) {
+            LOG.warn("{} is too large to decode", path);
+            return Decoded.none(path, "too large to decode");
+        }
+    }
+
+    /** {@code frames}, all one size, packed as {@link Picture#of} packs an animation: a square-ish grid, row by row. */
+    static Picture sheet(Stamp stamp, List<Frame> frames, int millis, VideoInfo info) {
+        int n = frames.size();
+        int fw = frames.get(0).width();
+        int fh = frames.get(0).height();
+        int columns = (int) Math.ceil(Math.sqrt(n));
+        int rows = (n + columns - 1) / columns;
+        int sheetW = fw * columns;
+        byte[] sheet = new byte[sheetW * fh * rows * 4];
+        int[] delays = new int[n];
+        for (int k = 0; k < n; k++) {
+            byte[] rgba = frames.get(k).rgba();
+            int x = (k % columns) * fw;
+            int y = (k / columns) * fh;
+            for (int r = 0; r < fh; r++) {
+                System.arraycopy(rgba, r * fw * 4, sheet, ((y + r) * sheetW + x) * 4, fw * 4);
+            }
+            delays[k] = n > 1 ? millis : 0;
+        }
+        return new Picture(stamp, sheet, fw, fh, columns, rows, delays, info.width(), info.height(), false);
     }
 
     /** A frame's size for a {@code w x h} video with the long side at most {@code side}: never larger, never zero. */
