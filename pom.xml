@@ -6,7 +6,7 @@
 
     <groupId>dev.vexelray.codec</groupId>
     <artifactId>vexelray-codec</artifactId>
-    <version>0.1.1-SNAPSHOT</version>
+    <version>0.1.1</version>
     <packaging>pom</packaging>
 
     <name>vexelray-codec</name>
@@ -48,14 +48,14 @@
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
 
         <!-- The stack, installed to the local .m2 from the sibling checkouts. -->
-        <vexelray.version>0.1.1-SNAPSHOT</vexelray.version>
-        <vexelray.gui.version>0.1.1-SNAPSHOT</vexelray.gui.version>
-        <vexelray.framework.version>0.1.1-SNAPSHOT</vexelray.framework.version>
-        <atchung.version>1.1-SNAPSHOT</atchung.version>
-        <kronometer.version>1.1-SNAPSHOT</kronometer.version>
-        <imagelib.version>0.1.1-SNAPSHOT</imagelib.version>
-        <ffmpeg.version>0.1.1-SNAPSHOT</ffmpeg.version>
-        <intrabuf.version>0.1.1-SNAPSHOT</intrabuf.version>
+        <vexelray.version>0.1.1</vexelray.version>
+        <vexelray.gui.version>0.1.1</vexelray.gui.version>
+        <vexelray.framework.version>0.1.1</vexelray.framework.version>
+        <atchung.version>1.1</atchung.version>
+        <kronometer.version>1.1</kronometer.version>
+        <imagelib.version>0.1.1</imagelib.version>
+        <ffmpeg.version>0.1.1</ffmpeg.version>
+        <intrabuf.version>0.1.1</intrabuf.version>
 
         <junit.version>5.11.4</junit.version>
     </properties>
