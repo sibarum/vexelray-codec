@@ -120,11 +120,18 @@ dev.vexelray.codec.video        frames, and no GUI type. Videos blocks: run it o
                                 of their own; forward by decoding, anywhere else by an exact seek; the last 64 kept.
   Sound                         (package-private) the sound as that Clock: the time being heard, and by the wall
                                 past the sound's end; its volume.
+  Recorder                      the other way: frames offered from any thread as they are shown, each with its
+                                time, encoded to AV1 in .mkv or .webm on a thread of its own. Never waits: a few
+                                queued, the rest dropped and counted. Recorder.start gives a Started, the recorder
+                                or why not.
 
 dev.vexelray.codec.video.gui    on vexelray-gui.
   VideoView                     one clip on a node, fitted and enlarged to its stage, paced by a krono shred: play,
                                 pause, resume, exact seek, loop, onEnd. A texture per frame (Textures.upload), the one
                                 before given back (Textures.release), one upload in flight at a time.
+  WindowVideoRecorder           the camera's "Record video to file…": vexelray-gui's WindowRecorder, found through
+                                META-INF/services. A window's presented frames, from its presenter's readback buffers,
+                                into a Recorder, encoded where the GPU left them.
 ```
 
 Video uses the image module's `Textures`, so an application that plays videos names `ImageStarter` and no starter of
@@ -174,6 +181,44 @@ keeps time all the same. Both are kept while the file is still opening and given
 `Playback.sounds` says whether there is any to hear, which is what a volume control is shown for. `ImageView.volume`
 and `ImageView.muted` give them to the picture playing and to every one shown after it, so a viewer keeps its level
 from one video to the next.
+
+**And recorded.** A `Recorder` records frames as a window shows them, in AV1, through `ffmpeg-wrapper`'s
+`Recording`:
+
+```java
+Recorder.Started s = Recorder.start(Path.of("window.mkv"), screenW, screenH, Recording.Settings.DEFAULT);  // off the loop
+if (s.recording()) {
+    Recorder rec = s.recorder();
+    rec.offer(new Frame(windowW, windowH, presentedMicros, rgba));   // from the render loop: returns at once
+    ...
+    rec.close();                                               // off the loop: the queue encoded, the file whole
+}
+```
+
+It encodes on a thread of its own and keeps at most `Recorder.QUEUE` frames waiting. A frame offered while the
+queue is full is dropped and counted, never waited for, because a recorder must not stall what it records. Each
+frame keeps the time it was shown, and Matroska keeps that time, so an idle window's pauses last as long as they
+did. The size given to `start` is a canvas, and every frame in the file is that size. A frame offered at the
+window's size goes at the canvas's top left, unscaled, on black, so a window resized mid-recording stays in one
+stream that plays everywhere. Give the canvas the screen's size. The black adds little to the file, but the encoder
+works on the whole canvas, so the CPU a recording takes follows the canvas, not the window. The default encoder is SVT-AV1 in real-time mode, which encodes a 1080p frame in about 7 ms on a laptop CPU.
+`Settings.withEncoder(HARDWARE)` uses the GPU's AV1 encoder where there is one. A failure ends the recording and
+`failure()` says why. It never ends the caller.
+
+**A person records a window from its camera.** With this module on an application's class path, the title bar's
+camera becomes a menu: *Take screenshot…*, and *Record video to file…*, which asks where in a save dialog and records
+that window until *Stop recording* (in any window's camera menu; the lens is filled while a recording runs). A script
+does the same with the automation socket's `record <path.mkv>` and `record stop`. Nothing else is needed: the GUI
+finds `WindowVideoRecorder` through `ServiceLoader` (`vexelray-gui-core`'s `WindowRecorder`), and an application
+without this module keeps the plain screenshot button.
+
+The frames come from the window's presenter (`vexelray`'s `FrameTap`), each one copied, inside the frame's own command
+buffer, into one of three mapped readback buffers. It is handed to the `Recorder` once the GPU has finished it and
+encoded from that buffer with no copy in Java, so the render loop never waits. Measured on the video player playing
+1080p at 24 fps in a 1280x760 window: 182 frames in 7.3 s, none dropped, and the frame recorded at the moment of a
+`shot` matching the screenshot at 38 dB PSNR. The canvas is the usable area of the monitor the window is on. Closing
+the window finishes the file, and a killed process leaves one that plays up to about its last second.
+`-Dvexelray.record.encoder=hardware` records with the GPU's encoder.
 
 Not yet: the display matrix's **rotation** (phone video shot upright plays on its side), and a **native image**
 (FFmpeg is shared libraries, so they would ship beside the executable). See `ffmpeg-wrapper`'s README.
