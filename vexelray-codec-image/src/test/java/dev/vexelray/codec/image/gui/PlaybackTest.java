@@ -16,8 +16,11 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.List;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.BooleanSupplier;
 import java.util.function.Consumer;
 
@@ -324,8 +327,8 @@ class PlaybackTest {
     }
 
     @Test
-    void aDecoderSlowerThanTheFramesStillShowsWhatItMakes() {
-        Laggard slow = new Laggard();
+    void aVideoDecoderSlowerThanItsFramesShowsWhatItMakesDroppingTheRest() {
+        Laggard slow = new Laggard(true);
         Motion m = new Motion(new Stamp(Path.of("slow.gif"), 1, 1), Laggard.FRAMES, Laggard.FRAMES * 10L, 0,
                 (motion, side) -> slow, false);
         KronoGui krono = KronoGui.attach(new Gui(Atchung.create()), Kron.driven());
@@ -346,11 +349,50 @@ class PlaybackTest {
         krono.close();
     }
 
-    /** Ten-millisecond frames, made one at a time only when the test says which. */
+    @Test
+    void anAnimatedImageTooSlowToDecodeShowsEveryFrameSlower() {
+        Laggard slow = new Laggard(false);
+        Motion m = new Motion(new Stamp(Path.of("slow.webp"), 1, 1), Laggard.FRAMES, Laggard.FRAMES * 10L, 0,
+                (motion, side) -> slow, false);
+        KronoGui krono = KronoGui.attach(new Gui(Atchung.create()), Kron.driven());
+        List<Integer> shown = new CopyOnWriteArrayList<>();
+        AtomicReference<Playback> play = new AtomicReference<>();
+        Playback p = new Playback(krono, new Textures(), (frame, w, h) -> { }, m, 64, () -> {
+            Playback q = play.get();
+            if (q != null && q.frame() >= 0 && (shown.isEmpty() || shown.getLast() != q.frame())) {
+                shown.add(q.frame());
+            }
+        });
+        play.set(p);
+        p.start(Runnable::run);
+        // 50 ms to make each 10 ms frame: the clock waits for each, so a second plays a fifth of a second.
+        for (int t = 1; t <= 1000; t++) {
+            if (t % 50 == 0) {
+                slow.make(slow.wanted);
+            }
+            krono.tick(Dur.ms(t));
+        }
+        assertTrue(shown.size() > 15, "it played on: " + shown);
+        for (int i = 0; i < shown.size(); i++) {
+            assertEquals(i, shown.get(i), "every frame, in order: " + shown);
+        }
+        assertTrue(p.position() < 300, "slowed to the decoder's pace, not the clock's: at " + p.position() + " ms");
+        p.close();
+        krono.close();
+    }
+
+    /** Ten-millisecond frames, made one at a time only when the test says which; dropped when late, or not. */
     private static final class Laggard implements Playable {
         static final int FRAMES = 200;
         private final byte[][][] made = new byte[FRAMES][][];
+        private final boolean drops;
         volatile int wanted;
+
+        Laggard(boolean drops) {
+            this.drops = drops;
+        }
+
+        public boolean drops() { return drops; }
 
         synchronized void make(int i) {
             made[i] = new byte[][] {new byte[4 * 3 * 4]};

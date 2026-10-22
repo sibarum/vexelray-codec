@@ -252,6 +252,12 @@ public final class Movie implements Playable {
         }
     }
 
+    /** None: every frame of an animated image is shown, a late one slowing it down. */
+    @Override
+    public boolean drops() {
+        return false;
+    }
+
     /** How many frames are kept; for a test. */
     int keptFrames() {
         synchronized (lock) {

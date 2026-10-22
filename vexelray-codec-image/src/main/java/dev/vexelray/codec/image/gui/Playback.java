@@ -24,10 +24,14 @@ import java.util.concurrent.atomic.AtomicInteger;
  * played the same way as the other. A shred on the timeline
  * keeps the picture's clock: it advances to each frame's time, asks the movie for the frame due, and hands it to the
  * stream, whose slot the plate is then pointed at. So a picture plays on the same clock as every animation in the
- * window, its frames are made ahead off the GUI thread, and a frame on screen costs a copy into a slot made once. A
- * frame the movie was too late with is looked for again a few milliseconds on, the newest frame it has made since the
- * one up being shown meanwhile, so a file that cannot be decoded as fast as it plays shows fewer frames rather than
- * falling behind, or stopping. Until the first frame after a start or a seek has come, the clock waits for it.
+ * window, its frames are made ahead off the GUI thread, and a frame on screen costs a copy into a slot made once.
+ * Until the first frame after a start or a seek has come, the clock waits for it.
+ *
+ * <p><b>A late frame is dropped from a video, and waited for in an animated image</b> ({@link Playable#drops}). A
+ * video's time is real, so a frame the movie was too late with is looked for again a few milliseconds on, the newest
+ * frame it has made since the one up being shown meanwhile: a file that cannot be decoded as fast as it plays shows
+ * fewer frames rather than falling behind, or stopping. An animated image's every frame is shown, the clock waiting
+ * for a late one, so a machine too slow for it plays it slower.
  *
  * <p><b>A playable with a clock of its own is followed by it.</b> A video's sound ({@link Playable#clock}) is heard at
  * the speaker's pace, so the shred shows the frame the sound has reached rather than counting time itself. The sound
@@ -483,8 +487,9 @@ public final class Playback {
                         }
                         changed.run();
                         return;
-                    } else if (shown < 0) {
-                        // The clock waits for the first frame, so a seek or a slow open does not skip the start.
+                    } else if (shown < 0 || !m.drops()) {
+                        // The clock waits for the first frame, so a seek or a slow open does not skip the start; and
+                        // for every frame of a movie that drops none, which a slow machine then plays slower.
                         Time.advance(Dur.ms(POLL_MS));
                         continue;
                     } else {

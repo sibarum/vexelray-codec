@@ -46,6 +46,15 @@ public interface Playable extends AutoCloseable {
     String failure();
 
     /**
+     * Whether a frame not made by the time it is due is passed over, so the pictures keep up with the clock: true, the
+     * default, for a video, whose time is real. False for an animated image, every frame of which is shown, the clock
+     * waiting for a late one, so a machine too slow for it plays it slower rather than skipping.
+     */
+    default boolean drops() {
+        return true;
+    }
+
+    /**
      * A clock this keeps for itself, which whoever shows it keeps time by instead of its own; or null, the usual
      * case, when it has none. A video with sound has one: sound is heard at the speaker's own pace, so the frames
      * follow the sound, never the other way round.
