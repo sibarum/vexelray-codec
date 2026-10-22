@@ -76,6 +76,22 @@ public interface Playable extends AutoCloseable {
          */
         default void volume(float volume) {
         }
+
+        /**
+         * Dynamic range compression on what it keeps time by, one knob from 0 (as the file has it) to 1: dialogue up
+         * and explosions down, through night mode at 0.5 to deliberately too much at 1. The time is unchanged by it.
+         * Nothing, for a clock with nothing to hear.
+         */
+        default void compression(float amount) {
+        }
+
+        /**
+         * Copy what was last heard into {@code stereo}, oldest first, left and right in turn, for a meter: the sample
+         * frames copied, at most {@code stereo.length / 2}. None, for a clock with nothing to hear.
+         */
+        default int heard(float[] stereo) {
+            return 0;
+        }
     }
 
     /** Stop decoding and close the file. Closing twice does nothing. */

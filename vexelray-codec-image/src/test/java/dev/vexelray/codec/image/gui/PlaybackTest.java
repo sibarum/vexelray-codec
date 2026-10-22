@@ -230,6 +230,25 @@ class PlaybackTest {
     }
 
     @Test
+    void theCompressionGoesToTheOwnClockMutedOrNot(@TempDir Path dir) throws IOException {
+        FakeClock own = new FakeClock();
+        try (Rig r = new Rig(dir, own, p -> p.compression(0.5f))) {
+            r.until(() -> own.running);
+            assertEquals(0.5f, own.compression, "given before the file opened, heard once it has");
+            r.play.compression(1f);
+            assertEquals(1f, own.compression);
+            r.play.muted(true);
+            assertEquals(1f, own.compression, "a mute is not a compression");
+            r.play.compression(7f);
+            assertEquals(1f, r.play.compression(), "no more than all the way up");
+            r.play.compression(Float.NaN);
+            assertEquals(0f, r.play.compression(), "and nonsense is none");
+            assertEquals(0f, own.compression);
+            assertTrue(own.running, "the clock keeps time throughout");
+        }
+    }
+
+    @Test
     void aVolumeGivenBeforeTheFileOpensIsHeardOnceItHas(@TempDir Path dir) throws IOException {
         FakeClock own = new FakeClock();
         try (Rig r = new Rig(dir, own, p -> {
@@ -335,6 +354,7 @@ class PlaybackTest {
         volatile boolean slow;
         final AtomicInteger seeks = new AtomicInteger();
         volatile float volume = 1f;
+        volatile float compression;
 
         @Override
         public long now() {
@@ -362,6 +382,11 @@ class PlaybackTest {
         @Override
         public void volume(float volume) {
             this.volume = volume;
+        }
+
+        @Override
+        public void compression(float amount) {
+            this.compression = amount;
         }
     }
 

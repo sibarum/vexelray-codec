@@ -39,12 +39,13 @@ import java.util.concurrent.atomic.AtomicInteger;
  * until it is let go, when it plays on if it was playing. A view holds its pictures while its window is not focused.
  * A pause of the viewer's own is not undone by letting go.
  *
- * <p><b>Its sound has a {@link #volume} and can be {@link #muted}</b>, kept while the file is still opening and given
- * to the sound once it is, and again whenever either changes. Silence is only silence: the clock keeps time as before.
+ * <p><b>Its sound has a {@link #volume}, can be {@link #muted} and has a {@link #compression}</b>, kept while the file
+ * is still opening and given to the sound once it is, and again whenever any changes. Silence is only silence, and
+ * compression only loudness: the clock keeps time as before.
  *
  * <p>Plays as soon as it opens, round and round: {@link #loop} is on until it is turned off. Every method may be
  * called from any thread; {@code changed} is told on the timeline or the GUI thread whenever what a transport bar
- * shows has moved: the frame, the clock's state, the loop, the volume and the mute.
+ * shows has moved: the frame, the clock's state, the loop, the volume, the mute and the compression.
  */
 public final class Playback {
 
@@ -82,9 +83,10 @@ public final class Playback {
     private boolean loop = true;
     private boolean closed;
     private String failure;
-    /** How loud the sound is, and whether it is silenced: given to the movie's clock whenever it has one. */
+    /** How loud the sound is, whether it is silenced, and how compressed: given to the movie's clock whenever it has one. */
     private float volume = 1f;
     private boolean muted;
+    private float compression;
     /** A frame on its way to the GPU, and the newest one due since, which goes next. */
     private boolean inFlight;
     private byte[][] pending;
@@ -305,6 +307,35 @@ public final class Playback {
         return muted;
     }
 
+    /**
+     * Dynamic range compression on its sound, one knob from 0 (as the file has it, the default) to 1: dialogue up and
+     * explosions down, through night mode at 0.5 to deliberately too much at 1. Kept, and given to the sound whenever
+     * the file is opened. The clock keeps time as before.
+     */
+    public void compression(float amount) {
+        synchronized (this) {
+            this.compression = amount > 0f ? Math.min(1f, amount) : 0f;     // NaN is none
+            sound();
+        }
+        changed.run();
+    }
+
+    public synchronized float compression() {
+        return compression;
+    }
+
+    /**
+     * Copy what its sound last gave the speaker into {@code stereo}, oldest first, left and right in turn, for a meter:
+     * the sample frames copied, at most a quarter of a second's. None when there is no sound to hear.
+     */
+    public int heard(float[] stereo) {
+        Playable.Clock own;
+        synchronized (this) {
+            own = movie == null ? null : movie.clock();
+        }
+        return own == null ? 0 : own.heard(stereo);
+    }
+
     /** Whether there is sound to hear: a video with sound, once its file is open. What a volume control is shown for. */
     public synchronized boolean sounds() {
         return movie != null && movie.clock() != null;
@@ -390,11 +421,12 @@ public final class Playback {
         }
     }
 
-    /** Tell the movie's clock how loud to be, if there is a movie and it keeps one. Under this. */
+    /** Tell the movie's clock how loud to be and how compressed, if there is a movie and it keeps one. Under this. */
     private void sound() {
         Playable.Clock own = movie == null ? null : movie.clock();
         if (own != null) {
             own.volume(muted ? 0f : volume);
+            own.compression(compression);
         }
     }
 

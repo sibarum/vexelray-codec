@@ -65,7 +65,8 @@ dev.vexelray.codec.image.gui    on vexelray-gui.
                                 the side it came from, over a backdrop (dark, light, checker, magenta, green) for its
                                 transparent pixels, and posed by its caller: zoomed, moved and turned (Pose), as
                                 visual transforms.
-  Playback                      how a picture that plays is played: play, pause, seek, step, loop, volume and mute;
+  Playback                      how a picture that plays is played: play, pause, seek, step, loop, volume, mute and
+                                compression, and what its sound was just heard as;
                                 paced by krono, its frames streamed through a GuiApp.stream, and held while the window
                                 is unfocused.
   ImageStarter                  for a framework application: Textures, bound to the window and unbound at shutdown.
@@ -121,7 +122,7 @@ dev.vexelray.codec.video        frames, and no GUI type. Videos blocks: run it o
   VideoGlimpses                 a video's Glimpses: the file opened again, small, its frames made by number on a thread
                                 of their own; forward by decoding, anywhere else by an exact seek; the last 64 kept.
   Sound                         (package-private) the sound as that Clock: the time being heard, and by the wall
-                                past the sound's end; its volume.
+                                past the sound's end; its volume and compression.
   Recorder                      the other way: frames offered from any thread as they are shown, each with its
                                 time, encoded to AV1 in .mkv or .webm on a thread of its own. Never waits: a few
                                 queued, the rest dropped and counted. Recorder.start gives a Started, the recorder
@@ -183,6 +184,16 @@ keeps time all the same. Both are kept while the file is still opening and given
 `Playback.sounds` says whether there is any to hear, which is what a volume control is shown for. `ImageView.volume`
 and `ImageView.muted` give them to the picture playing and to every one shown after it, so a viewer keeps its level
 from one video to the next.
+
+**How even.** `Playback.compression` and `ImageView.compression` are the night-mode knob, 0 to 1 and 0 by default.
+They are kept and handed down the same way, through `Playable.Clock.compression` to `Audio.compression`:
+- 0.25 tames only the extremes;
+- 0.5 is night mode;
+- 1 is deliberately too much.
+
+The clock keeps time exactly as without, so the pictures stay with the sound, and a turn of the knob is heard at once.
+`Playback.heard` copies what the sound last gave the speaker, through `Playable.Clock.heard`, for a meter. See
+*vexelray-codec-audio* below, and `ffmpeg-wrapper`'s README, *Compression*.
 
 **And recorded.** A `Recorder` records frames as a window shows them, in AV1, through `ffmpeg-wrapper`'s
 `Recording`:
@@ -273,8 +284,7 @@ heard at once. How it works, and what it measures, is in `ffmpeg-wrapper`'s READ
 position; every call after is answered from there.
 
 Not yet: a track's **duration** and **tags** (title, artist, cover), which need the wrapper to say them; **EQ** and
-**loudness normalization** between tracks; a **dialogue boost** in the 5.1 mixdown; a **video's** sound compressed
-(its `Sound` steers the same `Audio`, but `Playable.Clock` has no way to ask yet); several sounds **mixed** on one
+**loudness normalization** between tracks; a **dialogue boost** in the 5.1 mixdown; several sounds **mixed** on one
 device, and short sounds played from memory; a GUI half, a meter or a scope over `heard`; and moving
 `vexelray-codec-video`'s own `Sound` onto this module.
 

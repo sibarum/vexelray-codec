@@ -83,6 +83,55 @@ class SoundTest {
         }
     }
 
+    /**
+     * The tone is about 4 LU under the leveller's target: night mode (3:1) brings it up by about 2.5 dB, and all the
+     * way up (one loudness) by about 4. Each setting is heard at the same place in the stream, from its own open, since
+     * the AAC tone's level wanders by a dB or so along it.
+     */
+    @Test
+    void theKnobIsHeard() throws Exception {
+        double plain = loudnessAt(0f);
+        double nightUp = 20 * Math.log10(loudnessAt(0.5f) / plain);
+        double fullUp = 20 * Math.log10(loudnessAt(1f) / plain);
+        assertTrue(nightUp > 1.5 && nightUp < 3.5, "night mode, about 2.5 dB up: " + nightUp);
+        assertTrue(fullUp > nightUp + 0.5, "all the way up, further: " + fullUp);
+    }
+
+    /** What compression holds back, it holds in the decoder: the time is as it is without. */
+    @Test
+    void theTimeIsKeptCompressed() throws Exception {
+        Sound s = Sound.open(Fixtures.file("rgb.mp4"));
+        try {
+            s.compression(1f);
+            s.seek(500);
+            assertEquals(500, s.now(), "a seek is the clock at once");
+            s.run(true);
+            Thread.sleep(500);
+            long ran = s.now();
+            assertTrue(ran > 700 && ran < 1300, "after half a second, half a second on: " + ran);
+        } finally {
+            s.close();
+        }
+    }
+
+    /** The loudness heard at 1.1 s into rgb.mp4, played from 0.5 s at compression k. */
+    private static double loudnessAt(float k) throws Exception {
+        Sound s = Sound.open(Fixtures.file("rgb.mp4"));
+        try {
+            s.compression(k);
+            s.seek(500);
+            s.run(true);
+            long give = System.nanoTime() + 5_000_000_000L;
+            while (s.now() < 1100) {
+                assertTrue(System.nanoTime() < give, "the clock reached 1.1 s: " + s.now());
+                Thread.sleep(2);
+            }
+            return rms(s);
+        } finally {
+            s.close();
+        }
+    }
+
     @Test
     void aClosedSoundKeepsAnswering() throws Exception {
         Sound s = Sound.open(Fixtures.file("rgb.mp4"));
@@ -92,6 +141,19 @@ class SoundTest {
         assertEquals(1000, s.now());
         s.run(true);
         s.seek(0);
+        s.compression(1f);
+        assertEquals(0, s.heard(new float[16]));
+    }
+
+    /** The loudness of the last 50 ms heard. */
+    static double rms(Playable.Clock clock) {
+        float[] heard = new float[2205 * 2];
+        int got = clock.heard(heard);
+        double sum = 0;
+        for (int i = 0; i < got * 2; i++) {
+            sum += heard[i] * (double) heard[i];
+        }
+        return got == 0 ? 0 : Math.sqrt(sum / (got * 2.0));
     }
 
     private static Motion motion(String name) throws Exception {

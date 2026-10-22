@@ -166,9 +166,13 @@ public final class ImageView {
     private volatile Runnable onPlayback = () -> { };
     /** Whether the window is focused: pictures that play are held while it is not. */
     private volatile boolean focused = true;
-    /** How loud a picture that plays is heard, and whether it is silenced: every one shown, until told otherwise. */
+    /**
+     * How loud a picture that plays is heard, whether it is silenced, and how compressed: every one shown, until told
+     * otherwise.
+     */
     private volatile float volume = 1f;
     private volatile boolean muted;
+    private volatile float compression;
 
     public ImageView(Gui gui, KronoGui krono, Textures textures, Length padY, Length padX) {
         this.gui = gui;
@@ -305,6 +309,22 @@ public final class ImageView {
 
     public boolean muted() {
         return muted;
+    }
+
+    /**
+     * Dynamic range compression on pictures that play, one knob from 0 (the default) to 1: the one playing now, and
+     * every one shown after it, as the {@link #volume} is. See {@link Playback#compression}.
+     */
+    public void compression(float amount) {
+        this.compression = amount > 0f ? Math.min(1f, amount) : 0f;     // NaN is none
+        synchronized (this) {
+            front.sound();
+            back.sound();
+        }
+    }
+
+    public float compression() {
+        return compression;
     }
 
     /**
@@ -640,11 +660,12 @@ public final class ImageView {
                     at.mirrorX() ? r.u0() : r.u1(), at.mirrorY() ? r.v0() : r.v1());
         }
 
-        /** Give the picture's playing the view's volume and mute. */
+        /** Give the picture's playing the view's volume, mute and compression. */
         void sound() {
             if (playback != null) {
                 playback.volume(volume);
                 playback.muted(muted);
+                playback.compression(compression);
             }
         }
 

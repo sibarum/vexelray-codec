@@ -143,6 +143,32 @@ final class Sound implements Playable.Clock {
         }
     }
 
+    /** ffmpeg-wrapper's lookahead compression, which leaves the clock as it was. */
+    @Override
+    public synchronized void compression(float amount) {
+        if (closed || lost) {
+            return;
+        }
+        try {
+            audio.compression(amount);
+        } catch (RuntimeException | LinkageError e) {
+            lose(e);
+        }
+    }
+
+    @Override
+    public synchronized int heard(float[] stereo) {
+        if (closed || lost) {
+            return 0;
+        }
+        try {
+            return audio.heard(stereo);
+        } catch (RuntimeException | LinkageError e) {
+            lose(e);
+            return 0;
+        }
+    }
+
     /** Stop the sound and give the device back. Closing twice does nothing. */
     synchronized void close() {
         if (closed) {
