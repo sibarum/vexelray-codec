@@ -25,9 +25,9 @@ import java.util.concurrent.atomic.AtomicInteger;
  * keeps the picture's clock: it advances to each frame's time, asks the movie for the frame due, and hands it to the
  * stream, whose slot the plate is then pointed at. So a picture plays on the same clock as every animation in the
  * window, its frames are made ahead off the GUI thread, and a frame on screen costs a copy into a slot made once. A
- * frame the movie was too late with is looked for again a few milliseconds on, and frames passed meanwhile are not
- * shown, so a file that cannot be decoded as fast as it plays shows fewer frames rather than falling behind. Until
- * the first frame after a start or a seek has come, the clock waits for it.
+ * frame the movie was too late with is looked for again a few milliseconds on, the newest frame it has made since the
+ * one up being shown meanwhile, so a file that cannot be decoded as fast as it plays shows fewer frames rather than
+ * falling behind, or stopping. Until the first frame after a start or a seek has come, the clock waits for it.
  *
  * <p><b>A playable with a clock of its own is followed by it.</b> A video's sound ({@link Playable#clock}) is heard at
  * the speaker's pace, so the shred shows the frame the sound has reached rather than counting time itself. The sound
@@ -487,6 +487,17 @@ public final class Playback {
                         // The clock waits for the first frame, so a seek or a slow open does not skip the start.
                         Time.advance(Dur.ms(POLL_MS));
                         continue;
+                    } else {
+                        // Late. A movie slower than the clock lands each frame after it is due, so waiting for the
+                        // frame due would wait for ever: the newest it has made since the one up goes up meanwhile.
+                        for (int j = i - 1, lo = shown < i ? shown + 1 : 0; j >= lo; j--) {
+                            byte[][] made = m.frame(j);
+                            if (made != null) {
+                                present(j, made);
+                                shown = j;
+                                break;
+                            }
+                        }
                     }
                 }
                 long next = m.startOf(i) + m.delay(i);

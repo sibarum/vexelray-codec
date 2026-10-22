@@ -323,6 +323,52 @@ class PlaybackTest {
         krono.close();
     }
 
+    @Test
+    void aDecoderSlowerThanTheFramesStillShowsWhatItMakes() {
+        Laggard slow = new Laggard();
+        Motion m = new Motion(new Stamp(Path.of("slow.gif"), 1, 1), Laggard.FRAMES, Laggard.FRAMES * 10L, 0,
+                (motion, side) -> slow, false);
+        KronoGui krono = KronoGui.attach(new Gui(Atchung.create()), Kron.driven());
+        Playback p = new Playback(krono, new Textures(), (frame, w, h) -> { }, m, 64, () -> { });
+        p.start(Runnable::run);
+        // Each frame is up for 10 ms and takes 50 to make: the decoder makes whatever was wanted when it started, and
+        // by the time it lands the clock has moved five frames on.
+        int started = 0;
+        for (int t = 1; t <= 1000; t++) {
+            if (t % 50 == 0) {
+                slow.make(started);
+                started = slow.wanted;
+            }
+            krono.tick(Dur.ms(t));
+        }
+        assertTrue(p.frame() > 20, "the frames it made were shown, not passed over: at frame " + p.frame());
+        p.close();
+        krono.close();
+    }
+
+    /** Ten-millisecond frames, made one at a time only when the test says which. */
+    private static final class Laggard implements Playable {
+        static final int FRAMES = 200;
+        private final byte[][][] made = new byte[FRAMES][][];
+        volatile int wanted;
+
+        synchronized void make(int i) {
+            made[i] = new byte[][] {new byte[4 * 3 * 4]};
+        }
+
+        public int width() { return 4; }
+        public int height() { return 3; }
+        public int count() { return FRAMES; }
+        public long duration() { return FRAMES * 10L; }
+        public int delay(int i) { return 10; }
+        public long startOf(int i) { return i * 10L; }
+        public int frameAt(long ms) { return (int) Math.min(FRAMES - 1, Math.max(0, ms) / 10); }
+        public void want(int i, boolean wrap) { wanted = i; }
+        public synchronized byte[][] frame(int i) { return made[i]; }
+        public String failure() { return null; }
+        public void close() { }
+    }
+
     /** A playable whose file turned out to have nothing in it: no frames, and says so. */
     private static final class Empty implements Playable {
         public int width() { return 4; }
