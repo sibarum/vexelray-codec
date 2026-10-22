@@ -98,6 +98,34 @@ public final class Track implements AutoCloseable {
         steer(() -> audio.volume(Math.max(0f, Math.min(1f, volume))));
     }
 
+    /**
+     * Dynamic range compression, from 0 (as stored, the default) to 1; clamped to that. Loud passages are lowered,
+     * quiet ones raised and peaks limited to -6 dBFS, so dialogue can be heard without the explosions waking the
+     * house. The gain is worked out with the sound ahead in view, so it comes down before a loud passage or a bang
+     * rather than after, and nothing is delayed for it: the {@link #position} is as it would be without. A change
+     * is heard at once.
+     */
+    public synchronized void compression(float amount) {
+        steer(() -> audio.compression(amount));
+    }
+
+    /**
+     * Copy the sound last played into {@code stereo}, oldest first, left and right in turn, for a meter or a scope:
+     * compressed, before the {@link #volume}. Up to a quarter of a second is kept. The sample frames copied, at most
+     * {@code stereo.length / 2}; none once closed or lost.
+     */
+    public synchronized int heard(float[] stereo) {
+        if (closed || lost) {
+            return 0;
+        }
+        try {
+            return audio.heard(stereo);
+        } catch (RuntimeException | LinkageError e) {
+            lose(e);
+            return 0;
+        }
+    }
+
     /** The time of the sound being heard now, in ms from the start. Holds while paused, and once closed or lost. */
     public synchronized long position() {
         if (closed || lost) {

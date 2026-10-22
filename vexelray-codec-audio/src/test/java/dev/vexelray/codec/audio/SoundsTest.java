@@ -80,6 +80,37 @@ class SoundsTest {
         }
     }
 
+    /**
+     * The leveller is ffmpeg-wrapper's, tested there; here, that a track steers it and hears it. The tone is at
+     * about -21 LUFS, 3 LU under the leveller's target, so at 3:1 it comes up by about 2 dB.
+     */
+    @Test
+    void compressionRaisesAQuietTrack() throws Exception {
+        try (Track t = Sounds.open(fixture("tone.flac")).track()) {
+            t.seek(500);
+            t.play();
+            Thread.sleep(300);
+            double plain = rms(t);
+            t.compression(1f);
+            Thread.sleep(150);
+            double compressed = rms(t);
+            assertTrue(plain > 0, "it is heard");
+            double raised = 20 * Math.log10(compressed / plain);
+            assertTrue(raised > 1 && raised < 4, "compressed, about 2 dB louder: " + raised);
+        }
+    }
+
+    /** The loudness of the last 50 ms played. */
+    private static double rms(Track t) {
+        float[] heard = new float[2400 * 2];
+        int got = t.heard(heard);
+        double s = 0;
+        for (int i = 0; i < got * 2; i++) {
+            s += heard[i] * (double) heard[i];
+        }
+        return got == 0 ? 0 : Math.sqrt(s / (got * 2.0));
+    }
+
     @Test
     void aClosedTrackHoldsAndNeverThrows() throws Exception {
         Track t = Sounds.open(fixture("tone.ogg")).track();
@@ -89,6 +120,8 @@ class SoundsTest {
         assertTrue(t.closed());
         t.play();
         t.volume(0.5f);
+        t.compression(1f);
+        assertEquals(0, t.heard(new float[16]));
         assertEquals(1_000, t.position());
         assertTrue(t.ended());
     }

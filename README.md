@@ -233,8 +233,9 @@ dev.vexelray.codec.audio        sound, and no GUI type. Sounds.open blocks: run 
                                 exception: "not sound", "damaged sound", "no sound device".
   Cued                          what Sounds.open returns: what the file is ("MP3 sound · stereo · 44.1 kHz"), and its
                                 Track, or why not.
-  Track                         the sound, paused at its start: play, pause, seek and volume, and the position being
-                                heard. Steered from any thread; never throws once open.
+  Track                         the sound, paused at its start: play, pause, seek, volume and compression, the position
+                                being heard, and what was just heard, for a meter. Steered from any thread; never
+                                throws once open.
 ```
 
 ```java
@@ -244,6 +245,7 @@ if (cued.sound()) {
         t.play();
         long now = t.position();       // the ms being heard
         t.seek(12_500);                // exact, playing or paused
+        t.compression(1f);             // night mode: dialogue up, explosions down
     }
 }
 ```
@@ -254,12 +256,20 @@ into Java and a garbage collection cannot make it stutter. A file that also has 
 cover) opens as its sound. `-Dvexelray.sound` says where it goes, as for a video: `speakers`, `nowhere` (the tests) or
 `off`.
 
+**Compression is night mode, and should be easy to find.** `compression(1f)` raises quiet passages, lowers loud ones
+and limits peaks to −6 dBFS, so dialogue can be heard without the explosions waking the house. It works with true
+lookahead: the gain comes down before a loud passage or a bang arrives, not after. Nothing is delayed for it, so
+`position()` is as it would be without it, and a video stays with its pictures. A change is heard at once. How it
+works, and what it measures, is in `ffmpeg-wrapper`'s README, *Compression*.
+
 **Lost, not thrown.** Should the device go while a track plays, the track logs it, falls silent and holds its
 position; every call after is answered from there.
 
-Not yet: a track's **duration** and **tags** (title, artist, cover), which need the wrapper to say them; **samples in
-Java**, for a waveform; several sounds **mixed** on one device, and short sounds played from memory; a GUI half; and
-moving `vexelray-codec-video`'s own `Sound` onto this module.
+Not yet: a track's **duration** and **tags** (title, artist, cover), which need the wrapper to say them; **EQ** and
+**loudness normalization** between tracks; a **dialogue boost** in the 5.1 mixdown; a **video's** sound compressed
+(its `Sound` steers the same `Audio`, but `Playable.Clock` has no way to ask yet); several sounds **mixed** on one
+device, and short sounds played from memory; a GUI half, a meter or a scope over `heard`; and moving
+`vexelray-codec-video`'s own `Sound` onto this module.
 
 ### vexelray-codec-mesh
 
