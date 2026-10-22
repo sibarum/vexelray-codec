@@ -11,7 +11,7 @@ mvn install        # build, test, and put it in the local Maven repository
 ```
 
 Needs the VexelRay stack (through `vexelray-framework`), `imagelib-wrapper` and `ffmpeg-wrapper` installed to the local
-repository first. The image and video tests decode for real, so they fail rather than skip when a wrapper's native
+repository first. The image, video and audio tests decode for real, so they fail rather than skip when a wrapper's native
 library is missing.
 
 ## Modules
@@ -22,6 +22,8 @@ vexelray-codec-image     pictures, through imagelib-wrapper: PNG, JPEG, GIF, Web
 vexelray-codec-video     videos, through ffmpeg-wrapper: H.264, HEVC, VP9, AV1 and the rest, in MP4, MKV, WebM, MOV
                          and the rest; played on a node, a frame uploaded as each falls due, or as a picture that
                          plays, with its sound.
+vexelray-codec-audio     sound, through ffmpeg-wrapper: MP3, AAC, FLAC, Vorbis, Opus, WAV and the rest, as one Track
+                         played out of the speaker. No GUI type yet.
 vexelray-codec-mesh      meshes, in plain Java: OBJ, PLY (ASCII and binary), STL (ASCII and binary) and OFF, read
                          into one Mesh. Geometry only: no GUI type yet.
 vexelray-codec-asset     the stack's own asset file, .vxa: meshes, point clouds, volumes, 2D and 3D textures,
@@ -222,6 +224,42 @@ the window finishes the file, and a killed process leaves one that plays up to a
 
 Not yet: the display matrix's **rotation** (phone video shot upright plays on its side), and a **native image**
 (FFmpeg is shared libraries, so they would ship beside the executable). See `ffmpeg-wrapper`'s README.
+
+### vexelray-codec-audio
+
+```
+dev.vexelray.codec.audio        sound, and no GUI type. Sounds.open blocks: run it on Gui.offload().
+  Sounds                        a file opened as a Track, whatever its format. A failure is a reason, never an
+                                exception: "not sound", "damaged sound", "no sound device".
+  Cued                          what Sounds.open returns: what the file is ("MP3 sound · stereo · 44.1 kHz"), and its
+                                Track, or why not.
+  Track                         the sound, paused at its start: play, pause, seek and volume, and the position being
+                                heard. Steered from any thread; never throws once open.
+```
+
+```java
+Cued cued = Sounds.open(Path.of("song.flac"));
+if (cued.sound()) {
+    try (Track t = cued.track()) {
+        t.play();
+        long now = t.position();       // the ms being heard
+        t.seek(12_500);                // exact, playing or paused
+    }
+}
+```
+
+**The same sound a video plays.** A `Track` is ffmpeg-wrapper's `Audio`, the one a video's sound already goes through:
+decoded on a native thread, mixed to stereo at the speaker's rate, and handed to miniaudio, so the sound never comes
+into Java and a garbage collection cannot make it stutter. A file that also has pictures (a video, or an MP3 with its
+cover) opens as its sound. `-Dvexelray.sound` says where it goes, as for a video: `speakers`, `nowhere` (the tests) or
+`off`.
+
+**Lost, not thrown.** Should the device go while a track plays, the track logs it, falls silent and holds its
+position; every call after is answered from there.
+
+Not yet: a track's **duration** and **tags** (title, artist, cover), which need the wrapper to say them; **samples in
+Java**, for a waveform; several sounds **mixed** on one device, and short sounds played from memory; a GUI half; and
+moving `vexelray-codec-video`'s own `Sound` onto this module.
 
 ### vexelray-codec-mesh
 

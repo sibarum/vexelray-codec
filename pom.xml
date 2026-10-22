@@ -25,6 +25,10 @@
              rest), decoded ahead of the clock and played on a node, a frame uploaded as each falls due; and a poster
              frame as a Picture. Its natives are ffmpeg-wrapper's, bundled per platform. A picture that plays plays its sound. -->
         <module>vexelray-codec-video</module>
+        <!-- Sound: any file ffmpeg-wrapper decodes (MP3, AAC, FLAC, Vorbis, Opus, WAV and the rest), as one Track that
+             plays out of the speaker on the wrapper's own thread, pauses, seeks and keeps the time being heard. Its
+             natives are ffmpeg-wrapper's, bundled per platform. No GUI type yet. -->
+        <module>vexelray-codec-audio</module>
         <!-- Meshes: OBJ, PLY, STL and OFF read into one Mesh, its vertices, faces, edges and the data on each, as
              the file says it. Plain Java, no wrapper: these formats are text and flat records. Geometry only, no
              GUI type yet. -->
@@ -71,6 +75,11 @@
             <dependency>
                 <groupId>dev.vexelray.codec</groupId>
                 <artifactId>vexelray-codec-video</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>dev.vexelray.codec</groupId>
+                <artifactId>vexelray-codec-audio</artifactId>
                 <version>${project.version}</version>
             </dependency>
             <dependency>

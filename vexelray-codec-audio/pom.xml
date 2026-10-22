@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <parent>
+        <groupId>dev.vexelray.codec</groupId>
+        <artifactId>vexelray-codec</artifactId>
+        <version>0.1.2-SNAPSHOT</version>
+    </parent>
+
+    <artifactId>vexelray-codec-audio</artifactId>
+    <packaging>jar</packaging>
+
+    <name>vexelray-codec-audio</name>
+    <description>
+        Sound files on a VexelRay application. ffmpeg-wrapper decodes any sound FFmpeg does and plays it out of the
+        speaker on a thread of its own; this opens a file as a Track that plays, pauses, seeks and keeps the time being
+        heard, under one API whatever the format, and says why when a file is not sound.
+    </description>
+
+    <!--
+      One package for now, and no GUI type in it:
+
+        dev.vexelray.codec.audio      sound and nothing else. Sounds.open blocks: run it on Gui.offload(). A Track
+                                      plays on the wrapper's own thread and may be steered from any.
+
+      Portable. The only native code is FFmpeg, the shim over it and miniaudio, all ffmpeg-wrapper's, which bundles
+      them per platform under natives/<os>-<arch>/ and loads the ones for the host. Nothing here names an OS.
+    -->
+    <dependencies>
+        <dependency>
+            <groupId>sibarum.ffmpeg</groupId>
+            <artifactId>ffmpeg-wrapper</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>sibarum.atchung</groupId>
+            <artifactId>atchung-probe</artifactId>
+        </dependency>
+    </dependencies>
+</project>
