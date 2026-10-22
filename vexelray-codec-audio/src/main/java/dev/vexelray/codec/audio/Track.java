@@ -99,11 +99,12 @@ public final class Track implements AutoCloseable {
     }
 
     /**
-     * Dynamic range compression, from 0 (as stored, the default) to 1; clamped to that. Loud passages are lowered,
-     * quiet ones raised and peaks limited to -6 dBFS, so dialogue can be heard without the explosions waking the
-     * house. The gain is worked out with the sound ahead in view, so it comes down before a loud passage or a bang
-     * rather than after, and nothing is delayed for it: the {@link #position} is as it would be without. A change
-     * is heard at once.
+     * Dynamic range compression on one knob, from 0 (as stored, the default) to 1; clamped to that. Dialogue comes
+     * up and explosions come down: at 0.25 only the extremes are tamed, at 0.5 it is night mode, and at 1 it is
+     * deliberately too much, everything at one loudness and pumping, so the effect is unmistakable and the ear
+     * learns to hear it lower down. The gain is worked out with the sound ahead in view, so it comes down before a
+     * loud passage or a bang rather than after, and nothing is delayed for it: the {@link #position} is as it
+     * would be without. No sample is ever clipped, and a change is heard at once.
      */
     public synchronized void compression(float amount) {
         steer(() -> audio.compression(amount));

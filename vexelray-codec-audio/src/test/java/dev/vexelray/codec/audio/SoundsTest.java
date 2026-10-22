@@ -82,7 +82,7 @@ class SoundsTest {
 
     /**
      * The leveller is ffmpeg-wrapper's, tested there; here, that a track steers it and hears it. The tone is at
-     * about -21 LUFS, 3 LU under the leveller's target, so at 3:1 it comes up by about 2 dB.
+     * about -21 LUFS, 3 LU under the leveller's target, so in night mode (0.5, 3:1) it comes up by about 2 dB.
      */
     @Test
     void compressionRaisesAQuietTrack() throws Exception {
@@ -91,7 +91,7 @@ class SoundsTest {
             t.play();
             Thread.sleep(300);
             double plain = rms(t);
-            t.compression(1f);
+            t.compression(0.5f);
             Thread.sleep(150);
             double compressed = rms(t);
             assertTrue(plain > 0, "it is heard");

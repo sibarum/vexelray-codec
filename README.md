@@ -245,7 +245,7 @@ if (cued.sound()) {
         t.play();
         long now = t.position();       // the ms being heard
         t.seek(12_500);                // exact, playing or paused
-        t.compression(1f);             // night mode: dialogue up, explosions down
+        t.compression(0.5f);           // night mode: dialogue up, explosions down
     }
 }
 ```
@@ -256,11 +256,18 @@ into Java and a garbage collection cannot make it stutter. A file that also has 
 cover) opens as its sound. `-Dvexelray.sound` says where it goes, as for a video: `speakers`, `nowhere` (the tests) or
 `off`.
 
-**Compression is night mode, and should be easy to find.** `compression(1f)` raises quiet passages, lowers loud ones
-and limits peaks to −6 dBFS, so dialogue can be heard without the explosions waking the house. It works with true
-lookahead: the gain comes down before a loud passage or a bang arrives, not after. Nothing is delayed for it, so
-`position()` is as it would be without it, and a video stays with its pictures. A change is heard at once. How it
-works, and what it measures, is in `ffmpeg-wrapper`'s README, *Compression*.
+**Compression is one knob, and should be easy to find.** `compression(amount)` brings dialogue up and explosions
+down. The knob moves every setting together, so a GUI shows one control, not a compressor's seven:
+- 0.25 only tames the extremes;
+- 0.5 is night mode;
+- 1 is deliberately too much: everything at one loudness, pumping on every syllable, peaks crushed to −12 dBFS.
+
+Too much is the point. A listener who turns it all the way up hears exactly what it does, and learns to hear it lower
+down. It is never harmful: above 0, no sample plays above that setting's ceiling, which is never above 0 dBFS.
+
+It works with true lookahead: the gain comes down before a loud passage or a bang arrives, not after. Nothing is
+delayed for it, so `position()` is as it would be without it, and a video stays with its pictures. Turning the knob is
+heard at once. How it works, and what it measures, is in `ffmpeg-wrapper`'s README, *Compression*.
 
 **Lost, not thrown.** Should the device go while a track plays, the track logs it, falls silent and holds its
 position; every call after is answered from there.
