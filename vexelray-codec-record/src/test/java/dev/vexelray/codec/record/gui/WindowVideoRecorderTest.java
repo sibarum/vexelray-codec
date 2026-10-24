@@ -1,4 +1,4 @@
-package dev.vexelray.codec.video.gui;
+package dev.vexelray.codec.record.gui;
 
 import dev.vexelray.gui.core.WindowRecorder;
 import dev.vexelray.vulkan.present.TappedFrame;

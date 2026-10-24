@@ -1,11 +1,11 @@
-package dev.vexelray.codec.video;
+package dev.vexelray.codec.record;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import sibarum.ffmpeg.Ffmpeg;
 import sibarum.ffmpeg.Frame;
-import sibarum.ffmpeg.Recording;
 import sibarum.ffmpeg.Video;
+import sibarum.ffmpeg.record.Recording;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -18,7 +18,10 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-/** Records for real, on the recorder's own thread, and plays every file back through ffmpeg-wrapper. */
+/**
+ * Records for real, on the recorder's own thread, and plays every file back through ffmpeg-wrapper's decoding half
+ * (a test dependency only).
+ */
 class RecorderTest {
 
     private static final int RED = 0, GREEN = 1, BLUE = 2;
@@ -37,7 +40,7 @@ class RecorderTest {
         // none is dropped.
         for (int i = 0; i < 20; i++) {
             long t = i * 100_000L + (i >= 10 ? 1_500_000L : 0);
-            while (!rec.offer(solid(64, 48, i < 10 ? RED : GREEN, t))) {
+            while (!offer(rec, solid(64, 48, i < 10 ? RED : GREEN, t))) {
                 Thread.onSpinWait();
             }
             times.add(t);
@@ -57,8 +60,8 @@ class RecorderTest {
             for (int i = 0; i < 20; i++) {
                 assertEquals(times.get(i), frames.get(i).ptsMicros(), 1000, "frame " + i + "'s time");
             }
-            assertTrue(Fixtures.dominant(frames.get(5).rgba(), 64, 48, RED));
-            assertTrue(Fixtures.dominant(frames.get(15).rgba(), 64, 48, GREEN));
+            assertTrue(dominant(frames.get(5).rgba(), 64, 48, RED));
+            assertTrue(dominant(frames.get(15).rgba(), 64, 48, GREEN));
         }
     }
 
@@ -68,7 +71,7 @@ class RecorderTest {
         Recorder rec = Recorder.start(file, 1280, 720, Recording.Settings.DEFAULT).recorder();
         // Offered as fast as they can be made: some may be dropped, none waited for, all accounted.
         for (int i = 0; i < 60; i++) {
-            rec.offer(solid(1280, 720, i % 3, i * 16_667L));
+            offer(rec, solid(1280, 720, i % 3, i * 16_667L));
         }
         rec.close();
         assertNull(rec.failure());
@@ -87,10 +90,10 @@ class RecorderTest {
     void dropsAFrameNoLaterThanTheLast() {
         Recorder rec = Recorder.start(dir.resolve("order.mkv"), 64, 48, Recording.Settings.DEFAULT).recorder();
         try {
-            assertTrue(rec.offer(solid(64, 48, BLUE, 50_000)));
+            assertTrue(offer(rec, solid(64, 48, BLUE, 50_000)));
             // Dropped on offer while the first still waits, or by the encoder once it has gone: either way, dropped.
-            rec.offer(solid(64, 48, BLUE, 50_000));
-            rec.offer(solid(64, 48, BLUE, 10_000));
+            offer(rec, solid(64, 48, BLUE, 50_000));
+            offer(rec, solid(64, 48, BLUE, 10_000));
         } finally {
             rec.close();
         }
@@ -112,7 +115,7 @@ class RecorderTest {
         Recorder rec = Recorder.start(file, 64, 48, Recording.Settings.DEFAULT).recorder();
         int[][] sizes = {{64, 48}, {32, 24}, {80, 60}};
         for (int i = 0; i < sizes.length; i++) {
-            while (!rec.offer(solid(sizes[i][0], sizes[i][1], i, i * 100_000L))) {
+            while (!offer(rec, solid(sizes[i][0], sizes[i][1], i, i * 100_000L))) {
                 Thread.onSpinWait();
             }
         }
@@ -135,10 +138,10 @@ class RecorderTest {
     void closingTwiceDoesNothingAndAClosedRecorderDropsWhatItIsOffered() throws Exception {
         Path file = dir.resolve("closed.mkv");
         Recorder rec = Recorder.start(file, 64, 48, Recording.Settings.DEFAULT).recorder();
-        rec.offer(solid(64, 48, RED, 0));
+        offer(rec, solid(64, 48, RED, 0));
         rec.close();
         rec.close();
-        assertFalse(rec.offer(solid(64, 48, RED, 100_000)));
+        assertFalse(offer(rec, solid(64, 48, RED, 100_000)));
         assertEquals(1, rec.written());
         try (Video v = Ffmpeg.open(file)) {
             assertNotNull(v.next());
@@ -152,5 +155,20 @@ class RecorderTest {
             px[i + 3] = (byte) 0xff;
         }
         return new Frame(w, h, micros, px);
+    }
+
+    private static boolean offer(Recorder rec, Frame f) {
+        return rec.offer(f.rgba(), f.width(), f.height(), f.ptsMicros());
+    }
+
+    /** The centre pixel is channel {@code c} and little else, as a lossy codec leaves a solid colour. */
+    private static boolean dominant(byte[] rgba, int w, int h, int c) {
+        int p = ((h / 2) * w + w / 2) * 4;
+        for (int other = 0; other < 3; other++) {
+            if (other != c && !((rgba[p + c] & 0xFF) > 200 && (rgba[p + other] & 0xFF) < 60)) {
+                return false;
+            }
+        }
+        return true;
     }
 }

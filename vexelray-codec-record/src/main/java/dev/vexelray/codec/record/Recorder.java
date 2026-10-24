@@ -1,8 +1,6 @@
-package dev.vexelray.codec.video;
+package dev.vexelray.codec.record;
 
-import sibarum.ffmpeg.Ffmpeg;
-import sibarum.ffmpeg.Frame;
-import sibarum.ffmpeg.Recording;
+import sibarum.ffmpeg.record.Recording;
 import sibarum.probe.Log;
 
 import java.io.IOException;
@@ -20,7 +18,7 @@ import java.util.ArrayDeque;
  * for: a recorder must not stall what it records. SVT-AV1 encodes a 1080p frame in a fraction of a 60 fps frame's
  * time, so a full queue means a machine far slower than a laptop, or a far larger window.
  *
- * <p><b>Each frame keeps the time it was shown</b> ({@link Frame#ptsMicros}, from the recording's start), and the file
+ * <p><b>Each frame keeps the time it was shown</b> (in µs from the recording's start), and the file
  * keeps it too, so a window that draws nothing while idle is recorded with its pauses as long as they were.
  *
  * <p><b>Frames of any size, on one canvas.</b> The file's frames are all the canvas's size, given at {@link #start};
@@ -37,7 +35,7 @@ public final class Recorder implements AutoCloseable {
     /** Frames waiting to be encoded, at most. */
     public static final int QUEUE = 4;
 
-    private static final Log LOG = Log.of("codec.video");
+    private static final Log LOG = Log.of("codec.record");
 
     /**
      * What {@link #start} makes of a file: the recorder, or, when there is none, why not.
@@ -103,7 +101,7 @@ public final class Recorder implements AutoCloseable {
     public static Started start(Path file, int width, int height, Recording.Settings settings) {
         Recording recording;
         try {
-            recording = Ffmpeg.record(file, width, height, settings);
+            recording = Recording.create(file, width, height, settings);
         } catch (RuntimeException e) {
             return new Started(file, e.getMessage() == null ? e.toString() : e.getMessage(), null);
         } catch (LinkageError e) {
@@ -134,22 +132,22 @@ public final class Recorder implements AutoCloseable {
     }
 
     /**
-     * Queue {@code frame} to be encoded, and return at once. The frame's pixels are the recorder's now: the caller
-     * makes a new array for the next one rather than writing over this. True if it was queued; false if it was
+     * Queue the {@code width x height} frame {@code rgba} (straight RGBA8, top row first), shown at {@code micros}
+     * from the recording's start, to be encoded, and return at once. The array is the recorder's now: the caller
+     * makes a new one for the next frame rather than writing over this. True if it was queued; false if it was
      * dropped, because the queue is full, the recorder is closing or has failed, or its time does not come after
      * the last one queued. The frame may be any size: it goes at the canvas's top left, unscaled, on black, and
      * whatever falls outside the canvas is cut off.
      */
-    public boolean offer(Frame frame) {
-        return offer(new Shot(frame.rgba(), null, frame.width(), frame.height(), Recording.Pixels.RGBA,
-                frame.ptsMicros(), null));
+    public boolean offer(byte[] rgba, int width, int height, long micros) {
+        return offer(new Shot(rgba, null, width, height, Recording.Pixels.RGBA, micros, null));
     }
 
     /**
      * Queue the {@code width x height} frame at {@code pixels}, native memory in {@code order} (a presented frame where
      * the GPU left it), shown at {@code micros} from the recording's start, and return at once. It is encoded from
      * there, with no copy, and {@code release} is run once it has been, or at once if it is dropped, from whichever
-     * thread that happens on. Otherwise as {@link #offer(Frame)}.
+     * thread that happens on. Otherwise as {@link #offer(byte[], int, int, long)}.
      */
     public boolean offer(MemorySegment pixels, int width, int height, Recording.Pixels order, long micros,
                          Runnable release) {

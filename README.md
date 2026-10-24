@@ -22,6 +22,8 @@ vexelray-codec-image     pictures, through imagelib-wrapper: PNG, JPEG, GIF, Web
 vexelray-codec-video     videos, through ffmpeg-wrapper: H.264, HEVC, VP9, AV1 and the rest, in MP4, MKV, WebM, MOV
                          and the rest; played on a node, a frame uploaded as each falls due, or as a picture that
                          plays, with its sound.
+vexelray-codec-record    windows recorded to AV1, through ffmpeg-wrapper-record: the camera's "Record video to file…".
+                         Only an encoder, over an FFmpeg with no decoder in it.
 vexelray-codec-audio     sound, through ffmpeg-wrapper: MP3, AAC, FLAC, Vorbis, Opus, WAV and the rest, as one Track
                          played out of the speaker. No GUI type yet.
 vexelray-codec-mesh      meshes, in plain Java: OBJ, PLY (ASCII and binary), STL (ASCII and binary) and OFF, read
@@ -123,18 +125,11 @@ dev.vexelray.codec.video        frames, and no GUI type. Videos blocks: run it o
                                 of their own; forward by decoding, anywhere else by an exact seek; the last 64 kept.
   Sound                         (package-private) the sound as that Clock: the time being heard, and by the wall
                                 past the sound's end; its volume and compression.
-  Recorder                      the other way: frames offered from any thread as they are shown, each with its
-                                time, encoded to AV1 in .mkv or .webm on a thread of its own. Never waits: a few
-                                queued, the rest dropped and counted. Recorder.start gives a Started, the recorder
-                                or why not.
 
 dev.vexelray.codec.video.gui    on vexelray-gui.
   VideoView                     one clip on a node, fitted and enlarged to its stage, paced by a krono shred: play,
                                 pause, resume, exact seek, loop, onEnd. A texture per frame (Textures.upload), the one
                                 before given back (Textures.release), one upload in flight at a time.
-  WindowVideoRecorder           the camera's "Record video to file…": vexelray-gui's WindowRecorder, found through
-                                META-INF/services. A window's presented frames, from its presenter's readback buffers,
-                                into a Recorder, encoded where the GPU left them.
 ```
 
 Video uses the image module's `Textures`, so an application that plays videos names `ImageStarter` and no starter of
@@ -195,14 +190,32 @@ The clock keeps time exactly as without, so the pictures stay with the sound, an
 `Playback.heard` copies what the sound last gave the speaker, through `Playable.Clock.heard`, for a meter. See
 *vexelray-codec-audio* below, and `ffmpeg-wrapper`'s README, *Compression*.
 
-**And recorded.** A `Recorder` records frames as a window shows them, in AV1, through `ffmpeg-wrapper`'s
-`Recording`:
+### vexelray-codec-record
+
+```
+dev.vexelray.codec.record       frames into a file, and no GUI type.
+  Recorder                      frames offered from any thread as they are shown, each with its time, encoded to AV1
+                                in .mkv or .webm on a thread of its own. Never waits: a few queued, the rest dropped
+                                and counted. Recorder.start gives a Started, the recorder or why not.
+
+dev.vexelray.codec.record.gui   on vexelray-gui.
+  WindowVideoRecorder           the camera's "Record video to file…": vexelray-gui's WindowRecorder, found through
+                                META-INF/services. A window's presented frames, from its presenter's readback buffers,
+                                into a Recorder, encoded where the GPU left them.
+```
+
+**Only an encoder.** Recording is its own module, apart from `vexelray-codec-video` down to its FFmpeg:
+`ffmpeg-wrapper-record`, an FFmpeg built with the AV1 encoders and the Matroska and WebM muxers and nothing else
+(14 MB on Windows, against the decoders' 125). An application that records its windows and plays no video carries no
+decoder. One that does both (Pix, the video player) depends on both modules, and loads both FFmpegs side by side.
+
+A `Recorder` records frames as a window shows them, in AV1, through `ffmpeg-wrapper-record`'s `Recording`:
 
 ```java
 Recorder.Started s = Recorder.start(Path.of("window.mkv"), screenW, screenH, Recording.Settings.DEFAULT);  // off the loop
 if (s.recording()) {
     Recorder rec = s.recorder();
-    rec.offer(new Frame(windowW, windowH, presentedMicros, rgba));   // from the render loop: returns at once
+    rec.offer(rgba, windowW, windowH, presentedMicros);       // from the render loop: returns at once
     ...
     rec.close();                                               // off the loop: the queue encoded, the file whole
 }

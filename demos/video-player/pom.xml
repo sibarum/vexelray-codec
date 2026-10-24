@@ -74,6 +74,12 @@
             <artifactId>vexelray-codec-video</artifactId>
             <version>${vexelray-codec.version}</version>
         </dependency>
+        <!-- The camera's "Record video to file…", and ottermate's record verb. -->
+        <dependency>
+            <groupId>dev.vexelray.codec</groupId>
+            <artifactId>vexelray-codec-record</artifactId>
+            <version>${vexelray-codec.version}</version>
+        </dependency>
     </dependencies>
 
     <build>

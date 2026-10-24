@@ -1,9 +1,9 @@
-package dev.vexelray.codec.video.gui;
+package dev.vexelray.codec.record.gui;
 
-import dev.vexelray.codec.video.Recorder;
+import dev.vexelray.codec.record.Recorder;
 import dev.vexelray.gui.core.WindowRecorder;
 import dev.vexelray.vulkan.present.TappedFrame;
-import sibarum.ffmpeg.Recording;
+import sibarum.ffmpeg.record.Recording;
 
 import java.io.IOException;
 import java.nio.file.Path;
@@ -11,7 +11,7 @@ import java.nio.file.Path;
 /**
  * The camera's <i>Record video to file…</i>, in AV1: what {@code vexelray-gui}'s {@link WindowRecorder#find} finds when
  * this module is on the class path ({@code META-INF/services}). An application that wants its windows recordable
- * depends on {@code vexelray-codec-video} and does nothing else.
+ * depends on {@code vexelray-codec-record} and does nothing else: it brings the AV1 encoders and no decoder.
  *
  * <p>Each frame a window presents comes from its presenter's readback buffer ({@link TappedFrame}) and goes to a
  * {@link Recorder}, which encodes it from there, with no copy, on its own thread, and gives the buffer back. The

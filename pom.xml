@@ -25,6 +25,11 @@
              rest), decoded ahead of the clock and played on a node, a frame uploaded as each falls due; and a poster
              frame as a Picture. Its natives are ffmpeg-wrapper's, bundled per platform. A picture that plays plays its sound. -->
         <module>vexelray-codec-video</module>
+        <!-- Recording: the camera's "Record video to file…" for any window, frames encoded to AV1 as they are shown.
+             Through ffmpeg-wrapper-record, an FFmpeg with the AV1 encoders and no decoder, so an application that
+             records its windows carries no video player. Found through ServiceLoader: an application adds the
+             dependency and nothing else. -->
+        <module>vexelray-codec-record</module>
         <!-- Sound: any file ffmpeg-wrapper decodes (MP3, AAC, FLAC, Vorbis, Opus, WAV and the rest), as one Track that
              plays out of the speaker on the wrapper's own thread, pauses, seeks and keeps the time being heard. Its
              natives are ffmpeg-wrapper's, bundled per platform. No GUI type yet. -->
@@ -79,6 +84,11 @@
             </dependency>
             <dependency>
                 <groupId>dev.vexelray.codec</groupId>
+                <artifactId>vexelray-codec-record</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>dev.vexelray.codec</groupId>
                 <artifactId>vexelray-codec-audio</artifactId>
                 <version>${project.version}</version>
             </dependency>
@@ -109,6 +119,12 @@
             <dependency>
                 <groupId>sibarum.ffmpeg</groupId>
                 <artifactId>ffmpeg-wrapper</artifactId>
+                <version>${ffmpeg.version}</version>
+            </dependency>
+            <!-- The encoder: AV1 only, over an FFmpeg of its own with no decoder in it. -->
+            <dependency>
+                <groupId>sibarum.ffmpeg</groupId>
+                <artifactId>ffmpeg-wrapper-record</artifactId>
                 <version>${ffmpeg.version}</version>
             </dependency>
 

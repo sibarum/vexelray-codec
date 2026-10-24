@@ -1,0 +1,67 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <parent>
+        <groupId>dev.vexelray.codec</groupId>
+        <artifactId>vexelray-codec</artifactId>
+        <version>0.1.2-SNAPSHOT</version>
+    </parent>
+
+    <artifactId>vexelray-codec-record</artifactId>
+    <packaging>jar</packaging>
+
+    <name>vexelray-codec-record</name>
+    <description>
+        Windows recorded to video. The camera's "Record video to file…": each frame a window presents, taken from its
+        presenter's readback buffer and encoded to AV1 in Matroska on a thread of its own, through
+        ffmpeg-wrapper-record. Only an encoder: no decoder, no player, so an application that records its windows
+        carries a few megabytes of FFmpeg rather than every codec there is.
+    </description>
+
+    <!--
+      Two packages, split where the GUI starts, as in vexelray-codec-video:
+
+        dev.vexelray.codec.record       Recorder: frames offered from any thread, encoded on its own. No GUI type.
+        dev.vexelray.codec.record.gui   WindowVideoRecorder: vexelray-gui-core's WindowRecorder, which the camera
+                                        finds through ServiceLoader (META-INF/services). An application that wants
+                                        its windows recordable depends on this module and does nothing else.
+
+      Portable. The only native code is the encoding FFmpeg and the shim over it, and both are
+      ffmpeg-wrapper-record's, which bundles them per platform and loads the ones for the host.
+    -->
+    <dependencies>
+        <dependency>
+            <groupId>sibarum.ffmpeg</groupId>
+            <artifactId>ffmpeg-wrapper-record</artifactId>
+        </dependency>
+        <!-- WindowRecorder, the seam the camera finds this through. -->
+        <dependency>
+            <groupId>dev.vexelray.gui</groupId>
+            <artifactId>vexelray-gui-core</artifactId>
+        </dependency>
+        <!-- TappedFrame: a presented frame where the GPU left it. -->
+        <dependency>
+            <groupId>dev.vexelray</groupId>
+            <artifactId>vexelray-vulkan</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>sibarum.atchung</groupId>
+            <artifactId>atchung-probe</artifactId>
+        </dependency>
+
+        <!-- The tests play every recording back through the decoding half. Never at run time. -->
+        <dependency>
+            <groupId>sibarum.ffmpeg</groupId>
+            <artifactId>ffmpeg-wrapper</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.junit.jupiter</groupId>
+            <artifactId>junit-jupiter</artifactId>
+            <scope>test</scope>
+        </dependency>
+    </dependencies>
+</project>
