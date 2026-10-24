@@ -211,9 +211,11 @@ public final class Textures {
     }
 
     /**
-     * Copy {@code chain}, one frame's mip chain, into a free slot of {@code stream} and hand the slot to {@code then} on
-     * the GUI thread, which points a node at it; the slot shown before is then free again. {@code then} is given null
-     * if every slot is still in use, and the frame is not shown. False if there is no window.
+     * Copy {@code chain}, one frame's mip chain, into a free slot of {@code stream}, show it, and hand the slot to
+     * {@code then} on the GUI thread. Shown is what the stream's {@link StreamTexture#live} image draws, and a frame is
+     * asked for, so a node pointed at that once shows this frame without being written to; the slot shown before is
+     * free again. {@code then} is given null if every slot is still in use, and the frame is not shown. False if there
+     * is no window.
      */
     public boolean present(StreamTexture stream, byte[][] chain, Consumer<SampledImage> then) {
         GuiApp window = app;
@@ -231,8 +233,8 @@ public final class Textures {
             }
             slot.write(chain);
             stream.submit(slot);
-            then.accept(slot);
             stream.show(slot);
+            then.accept(slot);
         });
         return true;
     }

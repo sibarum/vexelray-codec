@@ -23,8 +23,10 @@ import java.util.concurrent.atomic.AtomicInteger;
  * the motion opens ({@link Motion#open}): a {@code Movie} for an animated image, a video's frames for a video, the one
  * played the same way as the other. A shred on the timeline
  * keeps the picture's clock: it advances to each frame's time, asks the movie for the frame due, and hands it to the
- * stream, whose slot the plate is then pointed at. So a picture plays on the same clock as every animation in the
- * window, its frames are made ahead off the GUI thread, and a frame on screen costs a copy into a slot made once.
+ * stream, which shows it. The plate is pointed at the stream's live image once, with the first frame, and each frame
+ * after is the stream's to show: a slot flipped and a frame asked for, never an edit to the tree. So a picture plays
+ * on the same clock as every animation in the window, its frames are made ahead off the GUI thread, and a frame on
+ * screen costs a copy into a slot made once.
  * Until the first frame after a start or a seek has come, the clock waits for it.
  *
  * <p><b>A late frame is dropped from a video, and waited for in an animated image</b> ({@link Playable#drops}). A
@@ -53,7 +55,10 @@ import java.util.concurrent.atomic.AtomicInteger;
  */
 public final class Playback {
 
-    /** Where a frame goes once it is on the GPU: the plate, pointed at {@code frame}, {@code width x height}. */
+    /**
+     * Where the frames go once on the GPU: the plate, pointed at {@code frame}, {@code width x height}. Told once per
+     * stream, with its live image as the first frame lands; the frames after it show through that by themselves.
+     */
     public interface Screen {
         void show(SampledImage frame, int width, int height);
     }
@@ -95,6 +100,8 @@ public final class Playback {
     private boolean inFlight;
     private byte[][] pending;
     private int pendingFrame;
+    /** The image the screen was last pointed at: a stream's live one. Read and written on the GUI thread. */
+    private SampledImage onScreen;
 
     /** Where the clock is, in ms into a pass, and the frame last put on the plate: written by the clock, read by anyone. */
     private volatile long position;
@@ -577,8 +584,14 @@ public final class Playback {
                 }
             }
             if (slot != null) {
-                // Outside this lock: the screen takes the view's, and the view calls in here holding it.
-                screen.show(slot, w, h);
+                // The stream has shown it: the plate is pointed at the stream once, and every frame after shows
+                // through that with no write. Outside this lock: the screen takes the view's, and the view calls in
+                // here holding it.
+                SampledImage live = s.live();
+                if (live != onScreen) {
+                    onScreen = live;
+                    screen.show(live, w, h);
+                }
                 frame = i;
                 changed.run();
             }
