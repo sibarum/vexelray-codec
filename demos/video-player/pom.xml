@@ -11,7 +11,7 @@
     -->
     <groupId>dev.vexelray.codec</groupId>
     <artifactId>video-player-demo</artifactId>
-    <version>0.1.2-SNAPSHOT</version>
+    <version>0.1.2</version>
 
     <name>video-player-demo</name>
 
@@ -19,11 +19,11 @@
         <maven.compiler.release>25</maven.compiler.release>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
 
-        <vexelray-framework.version>0.1.2-SNAPSHOT</vexelray-framework.version>
-        <vexelray-gui.version>0.1.2-SNAPSHOT</vexelray-gui.version>
-        <vexelray.version>0.1.2-SNAPSHOT</vexelray.version>
-        <tactroller.version>1.2-SNAPSHOT</tactroller.version>
-        <vexelray-codec.version>0.1.2-SNAPSHOT</vexelray-codec.version>
+        <vexelray-framework.version>0.1.2</vexelray-framework.version>
+        <vexelray-gui.version>0.1.2</vexelray-gui.version>
+        <vexelray.version>0.1.2</vexelray.version>
+        <tactroller.version>1.2</tactroller.version>
+        <vexelray-codec.version>0.1.2</vexelray-codec.version>
 
         <app.mainClass>dev.vexelray.codec.demo.video.Player</app.mainClass>
         <!-- The file to play, and any setting. Split on whitespace, so a path with a space will not do. -->

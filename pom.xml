@@ -6,7 +6,7 @@
 
     <groupId>dev.vexelray.codec</groupId>
     <artifactId>vexelray-codec</artifactId>
-    <version>0.1.2-SNAPSHOT</version>
+    <version>0.1.2</version>
     <packaging>pom</packaging>
 
     <name>vexelray-codec</name>
@@ -57,14 +57,14 @@
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
 
         <!-- The stack, installed to the local .m2 from the sibling checkouts. -->
-        <vexelray.version>0.1.2-SNAPSHOT</vexelray.version>
-        <vexelray.gui.version>0.1.2-SNAPSHOT</vexelray.gui.version>
-        <vexelray.framework.version>0.1.2-SNAPSHOT</vexelray.framework.version>
-        <atchung.version>1.2-SNAPSHOT</atchung.version>
-        <kronometer.version>1.2-SNAPSHOT</kronometer.version>
-        <imagelib.version>0.1.2-SNAPSHOT</imagelib.version>
-        <ffmpeg.version>0.1.2-SNAPSHOT</ffmpeg.version>
-        <intrabuf.version>0.1.2-SNAPSHOT</intrabuf.version>
+        <vexelray.version>0.1.2</vexelray.version>
+        <vexelray.gui.version>0.1.2</vexelray.gui.version>
+        <vexelray.framework.version>0.1.2</vexelray.framework.version>
+        <atchung.version>1.2</atchung.version>
+        <kronometer.version>1.2</kronometer.version>
+        <imagelib.version>0.1.2</imagelib.version>
+        <ffmpeg.version>0.1.2</ffmpeg.version>
+        <intrabuf.version>0.1.2</intrabuf.version>
 
         <junit.version>5.11.4</junit.version>
     </properties>
@@ -283,7 +283,7 @@
             <plugin>
                 <groupId>dev.vexelray.build</groupId>
                 <artifactId>vexelray-build-maven-plugin</artifactId>
-                <version>0.1.2-SNAPSHOT</version>
+                <version>0.1.2</version>
                 <executions>
                     <execution>
                         <id>isolate</id>
