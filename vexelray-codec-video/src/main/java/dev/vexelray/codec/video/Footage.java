@@ -3,6 +3,7 @@ package dev.vexelray.codec.video;
 import dev.vexelray.codec.image.Glimpses;
 import dev.vexelray.codec.image.Motion;
 import dev.vexelray.codec.image.Playable;
+import dev.vexelray.codec.image.Reasons;
 import dev.vexelray.vulkan.present.MipChain;
 import sibarum.ffmpeg.Frame;
 import sibarum.ffmpeg.Video;
@@ -324,9 +325,14 @@ public final class Footage implements Playable {
         } catch (Error e) {
             // The decoder itself has gone (its native library, the stack): nothing more is made, and whoever plays
             // this is told so, rather than waiting on a thread that is no longer there.
-            ended(0, e.toString());
+            ended(0, Reasons.failed(e), e);
         } finally {
-            clip.close();
+            try {
+                clip.close();
+            } catch (RuntimeException | LinkageError e) {
+                // Nothing left to give back, and a thread of its own has nobody to throw to.
+                LOG.debug("{} did not close: {}", clip.stamp().path(), e.toString());
+            }
         }
     }
 
@@ -350,7 +356,7 @@ public final class Footage implements Playable {
                 if (atEnd) {
                     // Nothing comes after the last frame: it stands for every number from its own to the end.
                     if (held == null) {
-                        ended(target, null);
+                        ended(target, null, null);
                         return;
                     }
                     cover(heldAt, Integer.MAX_VALUE);
@@ -390,10 +396,11 @@ public final class Footage implements Playable {
             }
         } catch (RuntimeException e) {
             // A damaged stream (VideoException), or anything else decoding or scaling it threw: the thread goes on.
-            ended(target, e.getMessage() == null ? e.toString() : e.getMessage());
+            // Said as where it broke; FFmpeg's own words, which name the file and its internals, are logged.
+            ended(target, target == 0 ? "does not decode" : "damaged at " + Videos.clock(startOf(target) * 1000), e);
             heldAt = -1;
         } catch (OutOfMemoryError e) {
-            ended(target, "too large to decode");
+            ended(target, "too large to decode", e);
             heldAt = -1;
         }
     }
@@ -452,8 +459,11 @@ public final class Footage implements Playable {
         }
     }
 
-    /** The stream ends, or stops decoding, before frame {@code at}: no frame from there on can be made. */
-    private void ended(int at, String why) {
+    /**
+     * The stream ends, or stops decoding, before frame {@code at}: no frame from there on can be made. {@code why} is
+     * what a person is shown, {@code cause} what threw, for the log; either may be null.
+     */
+    private void ended(int at, String why, Throwable cause) {
         synchronized (lock) {
             if (at < frames) {
                 frames = Math.max(0, at);
@@ -462,7 +472,8 @@ public final class Footage implements Playable {
                 }
                 if (why != null) {
                     failure = why;
-                    LOG.warn("{} stopped decoding at frame {}: {}", clip.stamp().path(), at, why);
+                    LOG.warn("{} stopped decoding at frame {}: {}", clip.stamp().path(), at,
+                            cause == null ? why : cause.toString());
                 }
             }
             lock.notifyAll();

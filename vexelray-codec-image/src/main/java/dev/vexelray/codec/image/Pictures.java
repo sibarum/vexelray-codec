@@ -96,7 +96,7 @@ public final class Pictures {
             }
             return decode(path, sample, Files.size(path), sides);
         } catch (IOException | RuntimeException e) {
-            return Decoded.none(path, "unreadable: " + e.getClass().getSimpleName());
+            return Decoded.none(path, Reasons.unreadable(e));
         }
     }
 
@@ -105,6 +105,9 @@ public final class Pictures {
      * {@code size}: for a caller that has read the start of the file already to decide what else it might be.
      */
     public static Decoded decode(Path path, byte[] sample, long size, int... sides) {
+        if (size == 0) {
+            return Decoded.none(path, "an empty file");   // a download not finished, or a file emptied: not a mystery
+        }
         Imagelib.Kind kind = probe(sample);
         if (kind == null) {
             return Decoded.none(path, "the image decoder is unavailable");
@@ -121,7 +124,7 @@ public final class Pictures {
             stamp = Stamp.of(path);
             bytes = Files.readAllBytes(path);
         } catch (IOException | RuntimeException e) {
-            return Decoded.none(path, "unreadable: " + e.getClass().getSimpleName());
+            return Decoded.none(path, Reasons.unreadable(e));
         } catch (OutOfMemoryError e) {
             LOG.warn("{} is too large to read", path);
             return Decoded.none(path, "too large to decode");
@@ -158,7 +161,7 @@ public final class Pictures {
         try (InputStream in = url.openStream()) {
             bytes = in.readAllBytes();
         } catch (IOException | RuntimeException e) {
-            return Decoded.none(name, "unreadable: " + e.getClass().getSimpleName());
+            return Decoded.none(name, Reasons.unreadable(e));
         }
         return of(url.toString(), bytes, sides);
     }
@@ -210,10 +213,12 @@ public final class Pictures {
             // The one error worth catching: it is this source's pixels that did not fit, and the next one's will.
             LOG.warn("{} is too large to decode", source);
             return Decoded.none(source, "too large to decode");
-        } catch (RuntimeException | LinkageError e) {
-            if (e instanceof LinkageError) {
-                unavailable(e);
-            }
+        } catch (LinkageError e) {
+            // Not the file's fault, and not to be blamed on it: every file after it would say the same.
+            unavailable(e);
+            return Decoded.none(source, "the image decoder is unavailable");
+        } catch (RuntimeException e) {
+            LOG.debug("{} did not decode: {}", source, e.toString());
             return Decoded.none(source, "does not decode as an image");
         }
     }

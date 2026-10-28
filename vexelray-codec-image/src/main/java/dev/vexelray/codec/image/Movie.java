@@ -331,9 +331,14 @@ public final class Movie implements Playable {
         } catch (Error e) {
             // The decoder itself has gone (its native library, the stack): nothing more is made, and whoever plays
             // this is told so, rather than waiting on a thread that is no longer there.
-            ended(0, e.toString());
+            ended(0, Reasons.failed(e), e);
         } finally {
-            animation.close();
+            try {
+                animation.close();
+            } catch (RuntimeException | LinkageError e) {
+                // Nothing left to give back, and a thread of its own has nobody to throw to.
+                LOG.debug("{} did not close: {}", stamp.path(), e.toString());
+            }
         }
     }
 
@@ -352,7 +357,7 @@ public final class Movie implements Playable {
             while (animation.index() < target) {
                 at = animation.index() + 1;
                 if (!animation.next()) {
-                    ended(at, null);
+                    ended(at, null, null);
                     return;
                 }
                 int k = animation.index();
@@ -371,9 +376,10 @@ public final class Movie implements Playable {
             }
         } catch (RuntimeException e) {
             // A damaged frame (ImageException), or anything else decoding or scaling it threw: the thread goes on.
-            ended(at, e.getMessage() == null ? e.toString() : e.getMessage());
+            // Said as where it broke; the decoder's own words, which name the file and its internals, are logged.
+            ended(at, at == 0 ? "does not decode" : "damaged after frame " + at, e);
         } catch (OutOfMemoryError e) {
-            ended(at, "too large to decode");
+            ended(at, "too large to decode", e);
         }
     }
 
@@ -401,8 +407,11 @@ public final class Movie implements Playable {
         }
     }
 
-    /** The file ends, or stops decoding, before frame {@code at}: no frame from there on can be made. */
-    private void ended(int at, String why) {
+    /**
+     * The file ends, or stops decoding, before frame {@code at}: no frame from there on can be made. {@code why} is
+     * what a person is shown, {@code cause} what threw, for the log; either may be null.
+     */
+    private void ended(int at, String why, Throwable cause) {
         synchronized (lock) {
             if (at < frames) {
                 frames = Math.max(0, at);
@@ -411,7 +420,8 @@ public final class Movie implements Playable {
                 }
                 if (why != null) {
                     failure = why;
-                    LOG.warn("{} stopped decoding at frame {}: {}", stamp.path(), at, why);
+                    LOG.warn("{} stopped decoding at frame {}: {}", stamp.path(), at,
+                            cause == null ? why : cause.toString());
                 }
             }
             lock.notifyAll();

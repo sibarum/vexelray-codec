@@ -274,7 +274,7 @@ class PlaybackTest {
         AtomicInteger changes = new AtomicInteger();
         Playback p = new Playback(krono, new Textures(), (frame, w, h) -> { }, m, 64, changes::incrementAndGet);
         p.start(Runnable::run);
-        assertEquals("no imagelib here", p.failure());
+        assertEquals("the decoder is unavailable", p.failure(), "said plainly, not as the linker put it");
         assertEquals(1, changes.get(), "and said");
         p.close();
         krono.close();
@@ -310,6 +310,35 @@ class PlaybackTest {
         p.step(1);
         p.seek(-5);
         p.close();
+        p.close();
+        krono.close();
+    }
+
+    @Test
+    void aPlayableThatThrowsWhilePlayingStopsWithAReason(@TempDir Path dir) throws IOException {
+        Motion gif = Pictures.of(gif(dir), 1024).picture().motion();
+        Motion m = new Motion(gif.stamp(), 3, 150, 0, (motion, side) -> new Broken(), false);
+        KronoGui krono = KronoGui.attach(new Gui(Atchung.create()), Kron.driven());
+        Playback p = new Playback(krono, new Textures(), (frame, w, h) -> { }, m, 64, () -> { });
+        p.start(Runnable::run);
+        for (int t = 1; t <= 100 && p.wanted(); t++) {
+            krono.tick(Dur.ms(t));
+        }
+        assertFalse(p.wanted(), "stopped, not a clock that died quietly");
+        assertEquals("does not decode", p.failure(), "said plainly, without the path or the decoder's words");
+        p.close();
+        krono.close();
+    }
+
+    @Test
+    void aFileGoneBeforeItOpensSaysSoWithoutItsPath() {
+        Motion m = new Motion(new Stamp(Path.of("gone.gif"), 1, 1), 3, 150, 0, (motion, side) -> {
+            throw new java.nio.file.NoSuchFileException("C:\\Users\\me\\Pictures\\gone.gif");
+        }, false);
+        KronoGui krono = KronoGui.attach(new Gui(Atchung.create()), Kron.driven());
+        Playback p = new Playback(krono, new Textures(), (frame, w, h) -> { }, m, 64, () -> { });
+        p.start(Runnable::run);
+        assertEquals("unreadable: not found", p.failure());
         p.close();
         krono.close();
     }
@@ -407,6 +436,21 @@ class PlaybackTest {
         public int frameAt(long ms) { return (int) Math.min(FRAMES - 1, Math.max(0, ms) / 10); }
         public void want(int i, boolean wrap) { wanted = i; }
         public synchronized byte[][] frame(int i) { return made[i]; }
+        public String failure() { return null; }
+        public void close() { }
+    }
+
+    /** A playable whose decoder throws where it should have answered, with its own words and the file's path. */
+    private static final class Broken implements Playable {
+        public int width() { return 4; }
+        public int height() { return 3; }
+        public int count() { return 3; }
+        public long duration() { return 150; }
+        public int delay(int i) { return 50; }
+        public long startOf(int i) { return i * 50L; }
+        public int frameAt(long ms) { throw new IllegalStateException("C:\\some\\clip.gif: the decoder's words"); }
+        public void want(int i, boolean wrap) { }
+        public byte[][] frame(int i) { return null; }
         public String failure() { return null; }
         public void close() { }
     }

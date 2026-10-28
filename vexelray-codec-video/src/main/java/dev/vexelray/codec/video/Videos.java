@@ -3,6 +3,7 @@ package dev.vexelray.codec.video;
 import dev.vexelray.codec.image.Decoded;
 import dev.vexelray.codec.image.Motion;
 import dev.vexelray.codec.image.Picture;
+import dev.vexelray.codec.image.Reasons;
 import dev.vexelray.codec.image.Stamp;
 import sibarum.ffmpeg.Ffmpeg;
 import sibarum.ffmpeg.Frame;
@@ -95,14 +96,24 @@ public final class Videos {
             }
             stamp = Stamp.of(path);
         } catch (IOException | RuntimeException e) {
-            return Opened.none(path, "unreadable: " + e.getClass().getSimpleName());
+            return Opened.none(path, Reasons.unreadable(e));
+        }
+        if (stamp.size() == 0) {
+            return Opened.none(path, "an empty file");   // a download not finished, or a recording that never started
         }
         Video video;
         try {
             video = Ffmpeg.open(path);
         } catch (RuntimeException e) {
             LOG.debug("{} did not open as a video: {}", path, e.getMessage());
-            return Opened.none(path, unopened(e.getMessage(), head(path)));
+            byte[] head;
+            try {
+                head = head(path);
+            } catch (IOException | RuntimeException h) {
+                // Locked by another program, or not ours to read: FFmpeg says only that it could not open it.
+                return Opened.none(path, Reasons.unreadable(h));
+            }
+            return Opened.none(path, unopened(e.getMessage(), head));
         } catch (LinkageError e) {
             unavailable(e);
             return Opened.none(path, "the video decoder is unavailable");
@@ -115,8 +126,13 @@ public final class Videos {
             video.output(out[0], out[1]);
             return new Opened(path, describe(info), new Clip(stamp, video, describe(info)));
         } catch (RuntimeException | OutOfMemoryError e) {
+            LOG.debug("{} opened and would not decode: {}", path, e.toString());
             closeQuietly(video);
-            return Opened.none(path, "does not decode as a video");
+            return Opened.none(path, e instanceof OutOfMemoryError ? "too large to decode" : "does not decode as a video");
+        } catch (LinkageError e) {
+            unavailable(e);
+            closeQuietly(video);
+            return Opened.none(path, "the video decoder is unavailable");
         }
     }
 
@@ -174,12 +190,10 @@ public final class Videos {
         return true;
     }
 
-    /** The first bytes of {@code path}, enough to tell a container by; none if it will not read. */
-    private static byte[] head(Path path) {
+    /** The first bytes of {@code path}, enough to tell a container by. Throws if it will not read: that is the reason. */
+    private static byte[] head(Path path) throws IOException {
         try (InputStream in = Files.newInputStream(path)) {
             return in.readNBytes(16);
-        } catch (IOException | RuntimeException e) {
-            return new byte[0];
         }
     }
 
@@ -372,7 +386,7 @@ public final class Videos {
 
     /** A codec as people write it: FFmpeg's short names are lower case, and H.264's has lost its dot. */
     static String codec(String name) {
-        return switch (name) {
+        return switch (name == null ? "" : name) {
             case "h264" -> "H.264";
             case "hevc" -> "HEVC";
             case "mpeg4" -> "MPEG-4";

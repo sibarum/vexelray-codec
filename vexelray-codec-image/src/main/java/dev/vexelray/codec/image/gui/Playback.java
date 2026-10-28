@@ -2,12 +2,15 @@ package dev.vexelray.codec.image.gui;
 
 import dev.vexelray.codec.image.Motion;
 import dev.vexelray.codec.image.Playable;
+import dev.vexelray.codec.image.Reasons;
 import dev.vexelray.gui.krono.KronoGui;
 import dev.vexelray.gui.krono.Scheduled;
 import dev.vexelray.vulkan.present.SampledImage;
 import dev.vexelray.vulkan.present.StreamTexture;
 import sibarum.kronometer.Dur;
+import sibarum.kronometer.Failures;
 import sibarum.kronometer.Time;
+import sibarum.probe.Log;
 
 import java.io.IOException;
 import java.util.concurrent.Executor;
@@ -73,6 +76,8 @@ public final class Playback {
      */
     static final long SEEK_SLACK_MS = 40;
 
+    private static final Log LOG = Log.of("codec.image");
+
     private final KronoGui krono;
     private final Textures textures;
     private final Screen screen;
@@ -133,8 +138,10 @@ public final class Playback {
             m = motion.open(side);
         } catch (IOException | RuntimeException | LinkageError | OutOfMemoryError e) {
             // A file that will not read or decode, or a decoder that will not load: said, never thrown, so the poster
-            // stays up with a reason instead of waiting for a movie that is not coming.
-            fail(e.getMessage() == null ? e.getClass().getSimpleName() : e.getMessage());
+            // stays up with a reason instead of waiting for a movie that is not coming. Said plainly: a file system's
+            // message is the path, and a decoder's names the file and its internals; those go to the log.
+            LOG.warn("{} will not play: {}", motion.stamp().path(), e.toString());
+            fail(Reasons.failed(e));
             return;
         }
         synchronized (this) {
@@ -457,93 +464,112 @@ public final class Playback {
             own.seek(from);
         }
         clock = krono.spork("picture-movie", () -> {
-            long pos = from;
-            int shown = -1;
-            boolean sounding = false;
-            while (generation.get() == g) {
-                boolean looping;
-                synchronized (this) {
-                    looping = loop;
-                }
-                int i = m.frameAt(pos);
-                m.want(i, looping);
-                if (i != shown) {
-                    byte[][] chain = m.frame(i);
-                    if (chain != null) {
-                        present(i, chain);
-                        shown = i;
-                        if (once) {
+            try {
+                long pos = from;
+                int shown = -1;
+                boolean sounding = false;
+                while (generation.get() == g) {
+                    boolean looping;
+                    synchronized (this) {
+                        looping = loop;
+                    }
+                    int i = m.frameAt(pos);
+                    m.want(i, looping);
+                    if (i != shown) {
+                        byte[][] chain = m.frame(i);
+                        if (chain != null) {
+                            present(i, chain);
+                            shown = i;
+                            if (once) {
+                                return;
+                            }
+                            if (own != null && !sounding) {
+                                // The sound starts with the first frame, as the clock does without it.
+                                own.run(true);
+                                sounding = true;
+                            }
+                        } else if (i >= m.count()) {
+                            // The file ended, or stopped decoding, before this frame (frameAt clamps, so only a file
+                            // with none at all): it is never coming. Stopped where it is, as at the end, rather than
+                            // looking for it every few milliseconds for ever.
+                            synchronized (this) {
+                                if (generation.get() == g) {
+                                    wanted = false;
+                                    if (own != null) {
+                                        own.run(false);
+                                    }
+                                }
+                            }
+                            changed.run();
+                            return;
+                        } else if (shown < 0 || !m.drops()) {
+                            // The clock waits for the first frame, so a seek or a slow open does not skip the start;
+                            // and for every frame of a movie that drops none, which a slow machine then plays slower.
+                            Time.advance(Dur.ms(POLL_MS));
+                            continue;
+                        } else {
+                            // Late. A movie slower than the clock lands each frame after it is due, so waiting for the
+                            // frame due would wait for ever: the newest it has made since the one up goes up meanwhile.
+                            for (int j = i - 1, lo = shown < i ? shown + 1 : 0; j >= lo; j--) {
+                                byte[][] made = m.frame(j);
+                                if (made != null) {
+                                    present(j, made);
+                                    shown = j;
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                    long next = m.startOf(i) + m.delay(i);
+                    long step = Math.max(1, Math.min(next - pos, MAX_STEP_MS));
+                    if (i != shown) {
+                        step = Math.min(step, POLL_MS);   // late: look for it again soon
+                    }
+                    Time.advance(Dur.ms(step));
+                    if (generation.get() != g) {
+                        return;
+                    }
+                    // With a clock of its own (a video's sound), the time is the clock's: the frames follow what is
+                    // heard.
+                    pos = sounding ? own.now() : pos + step;
+                    if (pos >= m.duration()) {
+                        if (looping && own != null) {
+                            pos = 0;
+                            own.seek(0);
+                        } else if (looping) {
+                            pos %= Math.max(1, m.duration());
+                        } else {
+                            position = m.duration();
+                            synchronized (this) {
+                                if (generation.get() == g) {
+                                    wanted = false;
+                                    if (own != null) {
+                                        own.run(false);
+                                    }
+                                }
+                            }
+                            changed.run();
                             return;
                         }
-                        if (own != null && !sounding) {
-                            // The sound starts with the first frame, as the clock does without it.
-                            own.run(true);
-                            sounding = true;
-                        }
-                    } else if (i >= m.count()) {
-                        // The file ended, or stopped decoding, before this frame (frameAt clamps, so only a file
-                        // with none at all): it is never coming. Stopped where it is, as at the end, rather than
-                        // looking for it every few milliseconds for ever.
-                        synchronized (this) {
-                            if (generation.get() == g) {
-                                wanted = false;
-                                if (own != null) {
-                                    own.run(false);
-                                }
-                            }
-                        }
-                        changed.run();
-                        return;
-                    } else if (shown < 0 || !m.drops()) {
-                        // The clock waits for the first frame, so a seek or a slow open does not skip the start; and
-                        // for every frame of a movie that drops none, which a slow machine then plays slower.
-                        Time.advance(Dur.ms(POLL_MS));
-                        continue;
-                    } else {
-                        // Late. A movie slower than the clock lands each frame after it is due, so waiting for the
-                        // frame due would wait for ever: the newest it has made since the one up goes up meanwhile.
-                        for (int j = i - 1, lo = shown < i ? shown + 1 : 0; j >= lo; j--) {
-                            byte[][] made = m.frame(j);
-                            if (made != null) {
-                                present(j, made);
-                                shown = j;
-                                break;
-                            }
+                    }
+                    position = pos;
+                }
+            } catch (Failures.ShredCancelled e) {
+                throw e;   // how a cancelled clock unwinds: the timeline's, not a failure
+            } catch (RuntimeException | LinkageError | OutOfMemoryError e) {
+                // A playable, a texture or a clock that threw while playing: stopped where it is with a reason, as a
+                // file that stops decoding is, rather than a shred that dies quietly and a picture that never moves.
+                LOG.warn("{} stopped playing: {}", motion.stamp().path(), e.toString());
+                synchronized (this) {
+                    if (generation.get() == g) {
+                        wanted = false;
+                        failure = Reasons.failed(e);
+                        if (own != null) {
+                            own.run(false);
                         }
                     }
                 }
-                long next = m.startOf(i) + m.delay(i);
-                long step = Math.max(1, Math.min(next - pos, MAX_STEP_MS));
-                if (i != shown) {
-                    step = Math.min(step, POLL_MS);   // late: look for it again soon
-                }
-                Time.advance(Dur.ms(step));
-                if (generation.get() != g) {
-                    return;
-                }
-                // With a clock of its own (a video's sound), the time is the clock's: the frames follow what is heard.
-                pos = sounding ? own.now() : pos + step;
-                if (pos >= m.duration()) {
-                    if (looping && own != null) {
-                        pos = 0;
-                        own.seek(0);
-                    } else if (looping) {
-                        pos %= Math.max(1, m.duration());
-                    } else {
-                        position = m.duration();
-                        synchronized (this) {
-                            if (generation.get() == g) {
-                                wanted = false;
-                                if (own != null) {
-                                    own.run(false);
-                                }
-                            }
-                        }
-                        changed.run();
-                        return;
-                    }
-                }
-                position = pos;
+                changed.run();
             }
         });
     }

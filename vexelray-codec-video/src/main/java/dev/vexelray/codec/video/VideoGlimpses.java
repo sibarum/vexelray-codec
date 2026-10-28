@@ -182,8 +182,15 @@ public final class VideoGlimpses implements Glimpses {
             }
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
+        } catch (Error e) {
+            // The decoder itself has gone: no more glimpses, and the video playing beside them is not moved by it.
+            LOG.warn("glimpses of {} stopped: {}", clip.stamp().path(), e.toString());
         } finally {
-            clip.close();
+            try {
+                clip.close();
+            } catch (RuntimeException | LinkageError e) {
+                LOG.debug("{} did not close: {}", clip.stamp().path(), e.toString());
+            }
         }
     }
 

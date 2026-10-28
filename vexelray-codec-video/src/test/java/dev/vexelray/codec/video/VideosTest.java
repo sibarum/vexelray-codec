@@ -67,7 +67,10 @@ class VideosTest {
         assertEquals("not a video", o.identity());
         assertEquals("not a video", Videos.poster(text, 0).identity());
         assertEquals("a folder", Videos.open(text.getParent(), 0).identity());
-        assertTrue(Videos.open(text.resolveSibling("no-such.mp4"), 0).identity().startsWith("unreadable"));
+        assertEquals("unreadable: not found", Videos.open(text.resolveSibling("no-such.mp4"), 0).identity());
+        Path empty = Files.createTempFile("empty", ".mp4");
+        assertEquals("an empty file", Videos.open(empty, 0).identity());
+        assertEquals("an empty file", Videos.poster(empty, 0).identity());
     }
 
     @Test
@@ -155,7 +158,7 @@ class VideosTest {
                 assertFalse(slides.identity().isEmpty(), name + " cut to " + keep);
             }
         }
-        assertEquals("not a video", Videos.open(Fixtures.cut("rgb.mp4", 0), 0).identity(), "an empty file");
+        assertEquals("an empty file", Videos.open(Fixtures.cut("rgb.mp4", 0), 0).identity());
         assertEquals("a damaged video", Videos.open(Fixtures.cut("rgb.mp4", 2_000), 0).identity(), "an MP4 cut short");
         assertEquals("a damaged video", Videos.poster(Fixtures.cut("rgb.webm", 400), 0).identity());
     }

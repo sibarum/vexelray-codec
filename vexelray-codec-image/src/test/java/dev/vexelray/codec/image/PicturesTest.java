@@ -124,14 +124,14 @@ class PicturesTest {
         Files.write(broken, head);
         assertEquals("does not decode as an image", Pictures.of(broken).identity());
 
-        assertTrue(Pictures.of(dir.resolve("gone.png")).identity().startsWith("unreadable"));
+        assertEquals("unreadable: not found", Pictures.of(dir.resolve("gone.png")).identity());
         assertEquals("a folder", Pictures.of(dir).identity());
     }
 
     @Test
     void anEmptyFileOrATruncatedAnimationIsAReasonNotAnException(@TempDir Path dir) throws IOException {
         Path empty = Files.createFile(dir.resolve("empty.png"));
-        assertEquals("not an image", Pictures.of(empty, 64).identity());
+        assertEquals("an empty file", Pictures.of(empty, 64).identity());
 
         // The header and the start of the first frame of an animated GIF: it says it may play, and has no frame.
         byte[] gif = PicturesTest.class.getResourceAsStream("/anim3.gif").readAllBytes();
