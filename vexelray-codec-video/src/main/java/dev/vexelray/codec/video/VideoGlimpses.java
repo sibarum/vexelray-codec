@@ -78,7 +78,7 @@ public final class VideoGlimpses implements Glimpses {
 
     /**
      * Open the file {@code motion} came from again, its frames at most {@code side} on their long side. Blocking: run
-     * it on {@code Gui.offload()}. Throws {@link IOException} with the reason if it does not open as a video that plays.
+     * it in a {@code @Job}. Throws {@link IOException} with the reason if it does not open as a video that plays.
      */
     public static VideoGlimpses open(Motion motion, int side) throws IOException {
         Opened o = Videos.open(motion.stamp().path(), side);

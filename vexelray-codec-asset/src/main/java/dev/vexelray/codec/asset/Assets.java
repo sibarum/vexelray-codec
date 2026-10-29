@@ -29,7 +29,7 @@ import java.util.Locale;
  * still hold an item this reader cannot unpack, packed with a codec or typed with a format newer than it: each item's
  * {@code known()} says, and the rest of the file is unaffected.
  *
- * <p>Blocking: run it on {@code Gui.offload()}.
+ * <p>Blocking: run it in a {@code @Job}.
  */
 public final class Assets {
 

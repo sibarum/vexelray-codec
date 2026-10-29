@@ -130,7 +130,7 @@ public final class Footage implements Playable {
 
     /**
      * Open the file {@code motion} came from, its frames at most {@code side} on their long side, and its sound on the
-     * speakers if it has any and there are speakers to play it on. Blocking: run it on {@code Gui.offload()}. Throws
+     * speakers if it has any and there are speakers to play it on. Blocking: run it in a {@code @Job}. Throws
      * {@link IOException} with the reason if it does not open as a video that plays; a sound that will not open is
      * not a reason, and the video plays without it.
      */

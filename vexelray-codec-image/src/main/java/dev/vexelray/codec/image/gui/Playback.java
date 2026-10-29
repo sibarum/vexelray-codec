@@ -121,17 +121,26 @@ public final class Playback {
         this.changed = changed;
     }
 
-    /** Open the file on {@code offload}, make the stream, and play from where the clock is. */
-    void start(Executor offload) {
+    /**
+     * Open the file on a thread of its own, make the stream, and play from where the clock is. Its own, as each decoder
+     * has one ({@code Movie}, {@code Reel}): 0.2 hands a widget no executor, and opening is the decoder's work, behind
+     * the picture rather than the application's.
+     */
+    void start() {
+        start(open -> Thread.ofPlatform().daemon().name("movie-open " + motion.stamp().path().getFileName()).start(open));
+    }
+
+    /** Open the file on {@code opener}, make the stream, and play from where the clock is. Tests open in place. */
+    void start(Executor opener) {
         try {
-            offload.execute(this::open);
+            opener.execute(this::open);
         } catch (RejectedExecutionException e) {
             // Shown as the application shuts down: there is no thread to open it on, and nothing will play.
             fail("nowhere to open it");
         }
     }
 
-    /** Open the file, make the stream, and play from where the clock is. Blocking: on the offload thread. */
+    /** Open the file, make the stream, and play from where the clock is. Blocking: on the opener's thread. */
     private void open() {
         Playable m;
         try {

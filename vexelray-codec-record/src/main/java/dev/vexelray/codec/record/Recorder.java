@@ -96,7 +96,7 @@ public final class Recorder implements AutoCloseable {
      * Create {@code file} ({@code .mkv} or {@code .webm}; one already there is replaced) and start recording into it,
      * on a canvas of {@code width x height}: the largest a frame will be, such as the screen's, so a window resized
      * while it is recorded stays in one stream, every pixel unscaled. Blocking: it opens the encoder and creates the file, so it is run off a
-     * render loop ({@code Gui.offload()}). A failure is a reason, never an exception.
+     * render loop (in a {@code @Job}). A failure is a reason, never an exception.
      */
     public static Started start(Path file, int width, int height, Recording.Settings settings) {
         Recording recording;

@@ -98,7 +98,7 @@ public final class Movie implements Playable {
 
     /**
      * Open the file {@code motion} came from, its frames scaled to at most {@code side} on their long side. Blocking: it
-     * reads the whole file; run it on {@code Gui.offload()}. Throws {@link IOException} if the file cannot be read and
+     * reads the whole file; run it in a {@code @Job}. Throws {@link IOException} if the file cannot be read and
      * {@link ImageException} if it does not decode. The caller closes it.
      */
     public static Movie open(Motion motion, int side) throws IOException {

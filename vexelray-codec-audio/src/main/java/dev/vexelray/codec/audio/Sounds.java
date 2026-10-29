@@ -23,8 +23,8 @@ import java.util.Set;
  * no sound device: each comes back as a {@link Cued} with no track and a line saying why, so the caller says so and
  * the next file is unaffected.
  *
- * <p>Blocking: {@link #open} reads enough of the file to know its streams and opens the device. Run it on
- * {@code Gui.offload()}.
+ * <p>Blocking: {@link #open} reads enough of the file to know its streams and opens the device. Run it in
+ * a {@code @Job}.
  */
 public final class Sounds {
 

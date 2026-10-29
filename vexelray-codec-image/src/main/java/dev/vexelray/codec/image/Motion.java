@@ -42,7 +42,7 @@ public record Motion(Stamp stamp, int frames, long durationMillis, int loops, So
     }
 
     /**
-     * Open the file, its frames at most {@code side} on their long side. Blocking: run it on {@code Gui.offload()}.
+     * Open the file, its frames at most {@code side} on their long side. Blocking: run it in a {@code @Job}.
      * Throws {@link IOException} if the file cannot be read, and a {@link RuntimeException} if it does not decode.
      * The caller closes what it gets.
      */
@@ -52,7 +52,7 @@ public record Motion(Stamp stamp, int frames, long durationMillis, int loops, So
 
     /**
      * Its frames one at a time by time ({@link Glimpses}), at most {@code side} on their long side; null if its source
-     * has none, as an animated image's has not. Blocking: run it on {@code Gui.offload()}. The caller closes what it
+     * has none, as an animated image's has not. Blocking: run it in a {@code @Job}. The caller closes what it
      * gets.
      */
     public Glimpses glimpses(int side) throws IOException {

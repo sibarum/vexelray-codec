@@ -34,7 +34,7 @@ import java.util.Set;
  * large to hold, or a machine where the native decoder will not load: each comes back as a {@link Decoded} with no
  * picture and a line saying why, so the GUI says so and the next file is unaffected.
  *
- * <p>Blocking: run it on {@code Gui.offload()}.
+ * <p>Blocking: run it in a {@code @Job}.
  */
 public final class Pictures {
 

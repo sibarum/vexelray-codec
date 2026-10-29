@@ -25,7 +25,7 @@ import java.util.Locale;
  * by line, in a text format), one too large to hold: each comes back as a {@link Loaded} with no mesh and a line
  * saying why, so the caller says so and the next file is unaffected.
  *
- * <p>Blocking: run it on {@code Gui.offload()}.
+ * <p>Blocking: run it in a {@code @Job}.
  */
 public final class Meshes {
 

@@ -8,6 +8,7 @@ import dev.vexelray.gui.core.Gui;
 import dev.vexelray.gui.core.Node;
 import dev.vexelray.gui.core.layout.Length;
 import dev.vexelray.gui.core.layout.NodeLayout;
+import dev.vexelray.gui.core.spi.Seams;
 import dev.vexelray.gui.krono.KronoGui;
 import dev.vexelray.gui.krono.Scheduled;
 import dev.vexelray.vulkan.present.SampledImage;
@@ -23,12 +24,11 @@ import java.util.concurrent.atomic.AtomicInteger;
  *
  * {@snippet :
  * VideoView view = new VideoView(gui, krono, textures, Length.ZERO, Length.ZERO);
- * gui.offload().execute(() -> {
- *     Opened o = Videos.open(path, 1920);            // blocking: off the GUI thread
- *     if (o.video()) {
- *         view.play(o.clip());                       // the view owns the clip now
- *     }
- * });
+ * // Opening blocks, so it is a @Job: Videos.open(path, 1920), its Opened in the reply.
+ * // The view that hears the reply:
+ * if (opened.video()) {
+ *     view.play(opened.clip());                      // the view owns the clip now
+ * }
  * }
  *
  * <p><b>Paced by krono, decoded by a {@link Reel}.</b> A shred on the timeline keeps the clip's clock: it advances to
@@ -91,7 +91,7 @@ public final class VideoView {
                 .children(plate);
         this.well = gui.column().width(Length.FILL).height(Length.grow(1f)).padding(padY, padX)
                 .scroll(false, false).children(stage);
-        gui.onResize(stage, box -> {
+        Seams.of(gui).onResize(stage, box -> {
             stageBox = box;
             fit();
         });

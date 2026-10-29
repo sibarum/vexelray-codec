@@ -34,7 +34,7 @@ import java.util.function.BiConsumer;
  * <p><b>Every failure is a reason, not an exception</b>, as in {@code Pictures}: a file that is not a video, one with no
  * decoder for its codec, or a machine where FFmpeg will not load comes back with no clip and a line saying why.
  *
- * <p>Blocking: run it on {@code Gui.offload()}.
+ * <p>Blocking: run it in a {@code @Job}.
  */
 public final class Videos {
 

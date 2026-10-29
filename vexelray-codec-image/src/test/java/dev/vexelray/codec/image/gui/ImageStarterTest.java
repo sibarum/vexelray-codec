@@ -81,6 +81,10 @@ final class ImageStarterTest {
                 import dev.vexelray.gui.krono.KronoGui;
                 @Configuration
                 final class Recipes {
+                    // Interim: 0.2 gives an application no KronoGui (gui step 18), and the codec's views still pace
+                    // their pictures with one until vexelray-gui's frame contract replaces the loops. Provided here
+                    // only so the view can be built; what this test checks is the order, not the clock.
+                    @Provides KronoGui krono(Gui gui) { return KronoGui.attach(gui); }
                     @Provides ImageView view(Gui gui, KronoGui krono, Textures textures) {
                         return new ImageView(gui, krono, textures, Length.ZERO, Length.ZERO);
                     }

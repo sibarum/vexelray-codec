@@ -6,7 +6,7 @@ import dev.vexelray.canvas.ImageFilter;
 import dev.vexelray.gui.core.Gui;
 import dev.vexelray.gui.core.ImageRegion;
 import dev.vexelray.gui.core.Node;
-import dev.vexelray.gui.core.input.InputTopics;
+import dev.vexelray.gui.core.spi.Seams;
 import dev.vexelray.gui.core.layout.Length;
 import dev.vexelray.gui.core.layout.NodeLayout;
 import dev.vexelray.gui.core.style.Role;
@@ -29,16 +29,15 @@ import java.util.concurrent.atomic.AtomicInteger;
  *
  * {@snippet :
  * ImageView view = new ImageView(gui, krono, textures, Length.ZERO, Length.ZERO);
- * gui.offload().execute(() -> {
- *     Decoded d = Pictures.of(path, 2048);           // blocking: off the GUI thread
- *     if (d.image()) {
- *         view.show(d.picture());
- *     }
- * });
+ * // Decoding blocks, so it is a @Job: Pictures.of(path, 2048), its Decoded in the reply.
+ * // The view that hears the reply:
+ * if (decoded.image()) {
+ *     view.show(decoded.picture());
+ * }
  * }
  *
  * <p><b>Sized in percent of a stage.</b> The layout has no aspect-ratio length, so the picture sits on a stage that
- * takes whatever room the well gives it, {@link Gui#onResize} reports the stage's box, and the picture is sized and
+ * takes whatever room the well gives it, {@link Seams#onResize} reports the stage's box, and the picture is sized and
  * placed in percent of it: the one unit that needs neither the density nor a pixel length. A vector has no size of its
  * own and fills the stage.
  *
@@ -188,12 +187,12 @@ public final class ImageView {
                 .scroll(false, false).children(stage);
         back.paint();
         front.paint();
-        gui.onResize(stage, box -> {
+        Seams.of(gui).onResize(stage, box -> {
             stageBox = box;
             fit();
             onFit.run();
         });
-        gui.onResize(ruler, box -> {
+        Seams.of(gui).onResize(ruler, box -> {
             if (box.present() && box.rect().w() > 0f) {
                 emPx = box.rect().w();
                 synchronized (this) {
@@ -203,7 +202,7 @@ public final class ImageView {
             }
         });
         // A picture that plays is held while its window is not focused, minimised included, and plays on when it is.
-        gui.bus().subscribe(InputTopics.INPUT, e -> {
+        gui.bus().subscribe(gui.input(), e -> {
             if (e instanceof InputEvent.FocusChanged f) {
                 focused = f.focused();
                 synchronized (this) {
@@ -610,7 +609,7 @@ public final class ImageView {
                 }, p.motion(), side, () -> onPlayback.run());
                 playback.hold(!focused);
                 sound();
-                playback.start(gui.offload());
+                playback.start();
                 return;
             }
             if (!p.animated()) {
