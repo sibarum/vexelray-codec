@@ -160,7 +160,7 @@ stepping a frame at a time, looping, holding while the window is unfocused, and 
 picture. One difference: fitted, a video fills its stage, as a player shows it, where a still or a GIF smaller than
 the stage is shown at its own size; the motion says so (`Motion.fills`, read through `Picture.enlarges`), so the
 viewer needs nothing from this module to tell them apart. The frames go through a `StreamTexture` rather than a
-texture each. A viewer that shows pictures and videos side by side (Pix) wants this; a player with nothing but video
+texture each. A viewer that shows pictures and videos side by side (Rasterware) wants this; a player with nothing but video
 can keep `VideoView`.
 
 **With its sound.** A picture that plays a video plays its sound too: `Footage.open` opens the file's sound on the
@@ -207,7 +207,7 @@ dev.vexelray.codec.record.gui   on vexelray-gui.
 **Only an encoder.** Recording is its own module, apart from `vexelray-codec-video` down to its FFmpeg:
 `ffmpeg-wrapper-record`, an FFmpeg built with the AV1 encoders and the Matroska and WebM muxers and nothing else
 (14 MB on Windows, against the decoders' 125). An application that records its windows and plays no video carries no
-decoder. One that does both (Pix, the video player) depends on both modules, and loads both FFmpegs side by side.
+decoder. One that does both (Rasterware, the video player) depends on both modules, and loads both FFmpegs side by side.
 
 A `Recorder` records frames as a window shows them, in AV1, through `ffmpeg-wrapper-record`'s `Recording`:
 
