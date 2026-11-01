@@ -25,10 +25,10 @@ import java.util.stream.IntStream;
  */
 public final class Resample {
 
-    /** sRGB byte to linear light. */
-    private static final float[] DECODE = new float[256];
+    /** sRGB byte to linear light. {@link Picture#fit} shrinks with it too. */
+    static final float[] DECODE = new float[256];
     /** Linear light, in {@code ENCODE.length - 1} steps, to an sRGB byte. */
-    private static final byte[] ENCODE = new byte[4096];
+    static final byte[] ENCODE = new byte[4096];
 
     static {
         for (int i = 0; i < 256; i++) {

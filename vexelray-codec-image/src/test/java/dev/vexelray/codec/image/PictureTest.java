@@ -39,6 +39,16 @@ class PictureTest {
     }
 
     @Test
+    void shrinkingAveragesInLinearLight() {
+        // Black beside white is half the light, which sRGB stores as 188; the bytes' own average, 128, is far darker.
+        byte[] src = {0, 0, 0, (byte) 255, (byte) 255, (byte) 255, (byte) 255, (byte) 255};
+        byte[] dst = new byte[4];
+        Picture.fit(src, 2, 1, dst, 1, 0, 0, 1, 1);
+        assertEquals(188, dst[0] & 0xFF);
+        assertEquals(255, dst[3] & 0xFF);
+    }
+
+    @Test
     void framesPastTheCapAreThinnedEvenly() {
         assertArrayEquals(new int[] {0, 1, 2}, Picture.thin(3));
         int[] keep = Picture.thin(Picture.MAX_FRAMES * 2);

@@ -165,7 +165,8 @@ public record Picture(Object key, byte[] sheet, int frameWidth, int frameHeight,
     /**
      * Copy a {@code w x h} image into the {@code fw x fh} cell at {@code (x, y)} of {@code dst}, box-filtering when it
      * shrinks. The average is taken premultiplied and divided back out, so a transparent pixel's colour, which means
-     * nothing, does not bleed into the edge of the opaque one beside it.
+     * nothing, does not bleed into the edge of the opaque one beside it; and in linear light, as {@link Resample} and
+     * the GPU's mips take theirs, since averaging the stored sRGB values darkens fine bright detail on dark ground.
      */
     static void fit(byte[] src, int w, int h, byte[] dst, int dstWidth, int x, int y, int fw, int fh) {
         if (fw == w && fh == h) {
@@ -180,23 +181,25 @@ public record Picture(Object key, byte[] sheet, int frameWidth, int frameHeight,
             for (int dx = 0; dx < fw; dx++) {
                 int sx0 = (int) ((long) dx * w / fw);
                 int sx1 = Math.max(sx0 + 1, (int) ((long) (dx + 1) * w / fw));
-                long r = 0, g = 0, b = 0, a = 0;
+                float r = 0, g = 0, b = 0;
+                long a = 0;
                 for (int sy = sy0; sy < sy1; sy++) {
                     int p = (sy * w + sx0) * 4;
                     for (int sx = sx0; sx < sx1; sx++, p += 4) {
                         int alpha = src[p + 3] & 0xFF;
-                        r += (src[p] & 0xFF) * alpha;
-                        g += (src[p + 1] & 0xFF) * alpha;
-                        b += (src[p + 2] & 0xFF) * alpha;
+                        r += Resample.DECODE[src[p] & 0xFF] * alpha;
+                        g += Resample.DECODE[src[p + 1] & 0xFF] * alpha;
+                        b += Resample.DECODE[src[p + 2] & 0xFF] * alpha;
                         a += alpha;
                     }
                 }
                 long area = (long) (sx1 - sx0) * (sy1 - sy0);
                 int q = ((y + dy) * dstWidth + x + dx) * 4;
                 if (a > 0) {
-                    dst[q] = (byte) ((r + a / 2) / a);
-                    dst[q + 1] = (byte) ((g + a / 2) / a);
-                    dst[q + 2] = (byte) ((b + a / 2) / a);
+                    int last = Resample.ENCODE.length - 1;
+                    dst[q] = Resample.ENCODE[(int) (Math.min(1f, r / a) * last + 0.5f)];
+                    dst[q + 1] = Resample.ENCODE[(int) (Math.min(1f, g / a) * last + 0.5f)];
+                    dst[q + 2] = Resample.ENCODE[(int) (Math.min(1f, b / a) * last + 0.5f)];
                 }
                 dst[q + 3] = (byte) ((a + area / 2) / area);
             }
