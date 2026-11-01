@@ -703,7 +703,7 @@ public final class ImageView {
                 picture = null;
                 onPlate = null;
                 plateRegion = ImageRegion.WHOLE;
-                plate.image(null);
+                plate.image((SampledImage) null);
             }
             sharpen(null, 1f, 0f, 0f, 0f, 0f);
             frame.visible(false);
@@ -723,7 +723,7 @@ public final class ImageView {
             sharpU1 = u1;
             sharpV1 = v1;
             if (texture == null) {
-                detail.visible(false).image(null);
+                detail.visible(false).image((SampledImage) null);
             } else {
                 placeDetail();
                 detail.visible(sharp());
