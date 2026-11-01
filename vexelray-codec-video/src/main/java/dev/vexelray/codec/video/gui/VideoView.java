@@ -356,7 +356,7 @@ public final class VideoView {
             reel = null;
         }
         playing = false;
-        plate.image(null);
+        plate.image((SampledImage) null);
         if (shown != null) {
             textures.release(shown);
             shown = null;
