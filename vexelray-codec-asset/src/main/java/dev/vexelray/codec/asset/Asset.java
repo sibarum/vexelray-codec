@@ -29,8 +29,9 @@ import java.util.Map;
  * @param fields      2D distance fields, compressed
  * @param shaders     compiled shadelet compositions
  * @param looks       how things are drawn, by shadelets
+ * @param drawings    drawings in signed distance graphics, full colour, each compiled (since 1)
  */
-@IntrabufMessage(name = "vexelray.asset.Asset", compat = Compat.FULL)
+@IntrabufMessage(name = "vexelray.asset.Asset", minor = 1, compat = Compat.FULL)
 public record Asset(String name, @Field(nonNull = true) Map<String, String> properties,
                     @Field(nonNull = true) List<MeshData> meshes,
                     @Field(nonNull = true) List<PointCloud> pointClouds,
@@ -38,9 +39,11 @@ public record Asset(String name, @Field(nonNull = true) Map<String, String> prop
                     @Field(nonNull = true) List<Texture> textures,
                     @Field(nonNull = true) List<DistanceField> fields,
                     @Field(nonNull = true) List<Shader> shaders,
-                    @Field(nonNull = true) List<Look> looks) {
+                    @Field(nonNull = true) List<Look> looks,
+                    @Field(nonNull = true, since = 1) List<Drawing> drawings) {
 
     public Asset {
+        drawings = drawings == null ? List.of() : List.copyOf(drawings);
         properties = Map.copyOf(properties);
         meshes = List.copyOf(meshes);
         pointClouds = List.copyOf(pointClouds);
@@ -59,7 +62,7 @@ public record Asset(String name, @Field(nonNull = true) Map<String, String> prop
     /** How many items it holds, of every kind. */
     public int items() {
         return meshes.size() + pointClouds.size() + volumes.size() + textures.size() + fields.size()
-                + shaders.size() + looks.size();
+                + shaders.size() + looks.size() + drawings.size();
     }
 
     /** Collects items. Not thread-safe. */
@@ -73,6 +76,7 @@ public record Asset(String name, @Field(nonNull = true) Map<String, String> prop
         private final List<DistanceField> fields = new ArrayList<>();
         private final List<Shader> shaders = new ArrayList<>();
         private final List<Look> looks = new ArrayList<>();
+        private final List<Drawing> drawings = new ArrayList<>();
 
         private Builder(String name) {
             this.name = name;
@@ -118,8 +122,14 @@ public record Asset(String name, @Field(nonNull = true) Map<String, String> prop
             return this;
         }
 
+        public Builder drawing(Drawing d) {
+            drawings.add(d);
+            return this;
+        }
+
         public Asset build() {
-            return new Asset(name, properties, meshes, pointClouds, volumes, textures, fields, shaders, looks);
+            return new Asset(name, properties, meshes, pointClouds, volumes, textures, fields, shaders, looks,
+                    drawings);
         }
     }
 }

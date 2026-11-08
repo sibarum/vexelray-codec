@@ -2,6 +2,7 @@ package dev.vexelray.codec.asset.future;
 
 import dev.vexelray.codec.asset.Channel;
 import dev.vexelray.codec.asset.DistanceField;
+import dev.vexelray.codec.asset.Drawing;
 import dev.vexelray.codec.asset.Look;
 import dev.vexelray.codec.asset.MeshData;
 import dev.vexelray.codec.asset.PointCloud;
@@ -15,11 +16,11 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * {@code Asset} as a later version might have it: the same schema at minor 1, with a list of a kind of thing that does
+ * {@code Asset} as a later version might have it: the same schema at minor 2 (drawings came at 1), with a list of a kind of thing that does
  * not exist yet on the end, and its textures at their own later minor. What CompatibilityTest reads with today's
  * {@code Asset}, and what reads today's files.
  */
-@IntrabufMessage(name = "vexelray.asset.Asset", minor = 1, compat = Compat.FULL)
+@IntrabufMessage(name = "vexelray.asset.Asset", minor = 2, compat = Compat.FULL)
 public record FutureAsset(String name, @Field(nonNull = true) Map<String, String> properties,
                           @Field(nonNull = true) List<MeshData> meshes,
                           @Field(nonNull = true) List<PointCloud> pointClouds,
@@ -28,5 +29,6 @@ public record FutureAsset(String name, @Field(nonNull = true) Map<String, String
                           @Field(nonNull = true) List<DistanceField> fields,
                           @Field(nonNull = true) List<Shader> shaders,
                           @Field(nonNull = true) List<Look> looks,
-                          @Field(since = 1, nonNull = true) List<Channel> splats) {
+                          @Field(since = 1, nonNull = true) List<Drawing> drawings,
+                          @Field(since = 2, nonNull = true) List<Channel> splats) {
 }

@@ -60,6 +60,8 @@
         <vexelray.version>0.2.0-SNAPSHOT</vexelray.version>
         <vexelray.gui.version>0.2.0-SNAPSHOT</vexelray.gui.version>
         <vexelray.framework.version>0.2.0-SNAPSHOT</vexelray.framework.version>
+        <!-- vexelray-fields: SDG, read by codec-image as a picture (the format, and its CPU renderer for posters). -->
+        <vexelray.fields.version>0.2.0-SNAPSHOT</vexelray.fields.version>
         <atchung.version>1.4-SNAPSHOT</atchung.version>
         <kronometer.version>1.3-SNAPSHOT</kronometer.version>
         <imagelib.version>0.1.3-SNAPSHOT</imagelib.version>
@@ -151,6 +153,12 @@
                 <groupId>dev.vexelray</groupId>
                 <artifactId>vexelray-canvas</artifactId>
                 <version>${vexelray.version}</version>
+            </dependency>
+            <!-- SDG: the format, and SdgRender for a drawing's raster poster. -->
+            <dependency>
+                <groupId>dev.vexelray.fields</groupId>
+                <artifactId>vexelray-fields-sdg</artifactId>
+                <version>${vexelray.fields.version}</version>
             </dependency>
             <!-- Dur and Time, and Ease. Transitive through gui-krono, declared because they are imported. -->
             <dependency>

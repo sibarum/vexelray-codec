@@ -32,7 +32,7 @@ class CompatibilityTest {
                 .map(t -> new FutureTexture(t.name(), t.format(), t.width(), t.height(), t.depth(), t.levels(), 6))
                 .toList();
         FutureAsset later = new FutureAsset(now.name(), now.properties(), now.meshes(), now.pointClouds(),
-                now.volumes(), textures, now.fields(), now.shaders(), now.looks(),
+                now.volumes(), textures, now.fields(), now.shaders(), now.looks(), now.drawings(),
                 List.of(Channel.f32("opacity", 1, new float[]{0.5f, 1})));
         byte[] payload = FutureAssetIntrabuf.toBytes(later);
         byte[] file = Arrays.copyOf(Assets.SIGNATURE, Assets.SIGNATURE.length + payload.length);
@@ -41,6 +41,7 @@ class CompatibilityTest {
         Unpacked u = Assets.read("later.vxa", file);
         assertTrue(u.readable(), u.identity());
         AssetsTest.assertSampler(u.asset());
+        AssetsTest.assertDrawing(u.asset());
     }
 
     @Test
@@ -58,6 +59,7 @@ class CompatibilityTest {
         Unpacked u = Assets.resource(CompatibilityTest.class, GOLDEN);
         assertTrue(u.readable(), u.identity());
         AssetsTest.assertSampler(u.asset());
+        assertEquals(List.of(), u.asset().drawings(), "a file from before drawings has none");
     }
 
     /**

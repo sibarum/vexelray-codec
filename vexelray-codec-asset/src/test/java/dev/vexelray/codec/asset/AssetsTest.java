@@ -31,9 +31,18 @@ class AssetsTest {
 
         Unpacked u = Assets.read(f);
         assertTrue(u.readable(), u.identity());
-        assertEquals("sampler · 1 mesh · 1 point cloud · 1 volume · 2 textures · 1 distance field · 1 shader · 1 look",
+        assertEquals("sampler · 1 mesh · 1 point cloud · 1 volume · 2 textures · 1 distance field · 1 shader · 1 look · 1 drawing",
                 u.identity());
         assertSampler(u.asset());
+        assertDrawing(u.asset());
+    }
+
+    /** The sample's drawing (since minor 1): its compiled bytes back as they went. */
+    static void assertDrawing(Asset a) {
+        assertEquals(1, a.drawings().size());
+        assertEquals("badge", a.drawings().getFirst().name());
+        assertArrayEquals(new byte[]{(byte) 0x89, 83, 68, 71, 13, 10, 26, 10, 1, 2, 3}, a.drawings().getFirst().sdgb(),
+                "a drawing's compiled bytes come back as they went");
     }
 
     @Test

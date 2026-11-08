@@ -1,5 +1,6 @@
 package dev.vexelray.codec.image;
 
+import dev.vexelray.fields.sdg.SdgFile;
 import sibarum.imagelib.Animation;
 import sibarum.imagelib.Frames;
 import sibarum.imagelib.ImageException;
@@ -55,7 +56,7 @@ public final class Pictures {
      * from the name, which is what a listing can afford; the bytes decide when the file is shown.
      */
     static final Set<String> EXTENSIONS = Set.of("png", "apng", "jpg", "jpeg", "jfif", "gif", "webp", "bmp", "ico",
-            "tif", "tiff", "tga", "qoi", "pnm", "pbm", "pgm", "ppm", "pam", "svg", "svgz");
+            "tif", "tiff", "tga", "qoi", "pnm", "pbm", "pgm", "ppm", "pam", "svg", "svgz", "sdg", "sdgb");
 
     private static final Log LOG = Log.of("codec.image");
 
@@ -108,6 +109,16 @@ public final class Pictures {
         if (size == 0) {
             return Decoded.none(path, "an empty file");   // a download not finished, or a file emptied: not a mystery
         }
+        if (Sdgs.is(path.getFileName() == null ? "" : path.getFileName().toString(), sample)) {
+            if (size > MAX_IMAGE) {
+                return Decoded.none(path, "too large to show");
+            }
+            try {
+                return Sdgs.decode(path, Stamp.of(path), SdgFile.read(path), sides);
+            } catch (IOException | RuntimeException e) {
+                return Decoded.none(path, Reasons.unreadable(e));
+            }
+        }
         Imagelib.Kind kind = probe(sample);
         if (kind == null) {
             return Decoded.none(path, "the image decoder is unavailable");
@@ -137,6 +148,13 @@ public final class Pictures {
      * with one name are taken to be the same image: name each distinct image distinctly.
      */
     public static Decoded of(String name, byte[] bytes, int... sides) {
+        if (Sdgs.is(name, bytes)) {
+            try {
+                return Sdgs.decode(name, name, SdgFile.read(bytes), sides);
+            } catch (RuntimeException e) {
+                return Decoded.none(name, Reasons.unreadable(e));
+            }
+        }
         Imagelib.Kind kind = probe(bytes);
         if (kind == null) {
             return Decoded.none(name, "the image decoder is unavailable");

@@ -53,6 +53,11 @@
             <groupId>dev.vexelray</groupId>
             <artifactId>vexelray-canvas</artifactId>
         </dependency>
+        <!-- SDG files as pictures: read by its format, posters drawn by its CPU renderer, shown natively. -->
+        <dependency>
+            <groupId>dev.vexelray.fields</groupId>
+            <artifactId>vexelray-fields-sdg</artifactId>
+        </dependency>
         <dependency>
             <groupId>dev.vexelray</groupId>
             <artifactId>vexelray-vulkan</artifactId>

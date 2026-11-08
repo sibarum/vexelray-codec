@@ -153,6 +153,7 @@ public final class Assets {
         count(s, a.fields().size(), "distance field", "distance fields");
         count(s, a.shaders().size(), "shader", "shaders");
         count(s, a.looks().size(), "look", "looks");
+        count(s, a.drawings().size(), "drawing", "drawings");
         return s.toString();
     }
 

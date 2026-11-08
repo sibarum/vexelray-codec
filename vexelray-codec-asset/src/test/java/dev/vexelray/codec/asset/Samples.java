@@ -87,6 +87,7 @@ final class Samples {
                 .field(DistanceField.ofRgba("disc", discRgba(), 8, 4))
                 .shader(shader())
                 .look(look())
+                .drawing(new Drawing("badge", new byte[]{(byte) 0x89, 83, 68, 71, 13, 10, 26, 10, 1, 2, 3}))
                 .build();
     }
 }

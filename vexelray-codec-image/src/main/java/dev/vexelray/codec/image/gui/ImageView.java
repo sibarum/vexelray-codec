@@ -405,7 +405,8 @@ public final class ImageView {
         int g;
         synchronized (this) {
             layer = front;
-            if (of == null || part == null || layer.picture != of) {
+            // A drawing is drawn, sharp at every zoom already: a part of its poster would only cover it.
+            if (of == null || part == null || layer.picture != of || layer.native_()) {
                 return false;
             }
             g = layer.generation.get();
@@ -640,13 +641,27 @@ public final class ImageView {
             plate(texture, ImageRegion.WHOLE);
         }
 
-        /** Put {@code region} of {@code texture} on the plate, mirrored as the pose has it. */
+        /**
+         * Put {@code region} of {@code texture} on the plate, mirrored as the pose has it; or, for an SDG drawing, the
+         * drawing itself, drawn natively and sharp at any zoom, its poster kept for a mirrored pose, which a drawing's
+         * layers cannot be read for.
+         */
         void plate(SampledImage texture, ImageRegion region) {
             onPlate = texture;
             plateRegion = region;
             drawnX = pose.mirrorX();
             drawnY = pose.mirrorY();
-            plate.image(texture, mirrored(region));
+            if (native_()) {
+                plate.image((SampledImage) null).sdg(picture.drawing());
+                return;
+            }
+            plate.sdg(null).image(texture, mirrored(region));
+        }
+
+        /** Whether the plate shows the picture's drawing itself: it is one, and the pose mirrors it neither way. */
+        boolean native_() {
+            Picture p = picture;
+            return p != null && p.drawing() != null && !pose.mirrorX() && !pose.mirrorY();
         }
 
         /** {@code r} read the other way along each axis the pose mirrors. */
@@ -703,7 +718,7 @@ public final class ImageView {
                 picture = null;
                 onPlate = null;
                 plateRegion = ImageRegion.WHOLE;
-                plate.image((SampledImage) null);
+                plate.image((SampledImage) null).sdg(null);
             }
             sharpen(null, 1f, 0f, 0f, 0f, 0f);
             frame.visible(false);
@@ -802,7 +817,7 @@ public final class ImageView {
                 drawnX = at.mirrorX();
                 drawnY = at.mirrorY();
                 if (onPlate != null) {
-                    plate.image(onPlate, mirrored(plateRegion));
+                    plate(onPlate, plateRegion);   // a drawing goes to its poster mirrored, and back unmirrored
                 }
                 if (sharp != null) {
                     placeDetail();

@@ -1,5 +1,7 @@
 package dev.vexelray.codec.image;
 
+import dev.vexelray.gui.core.ImageSdg;
+import dev.vexelray.gui.core.ImageSdg;
 import sibarum.imagelib.Frames;
 
 import java.lang.foreign.MemorySegment;
@@ -34,9 +36,19 @@ import java.util.Arrays;
  * @param vector       whether this was rasterised from a document with no pixel size of its own
  * @param motion       when this is the first frame of a file that plays, what the file says about its playing; a
  *                     {@link Movie} plays it. Null for a still, and for an animation packed whole into the sheet
+ * @param drawing      when this is an SDG drawing ({@code .sdg}, {@code .sdgb}), the drawing itself, which a view draws
+ *                     natively, sharp at any size, the sheet being its poster for whatever shows pixels; else null
  */
 public record Picture(Object key, byte[] sheet, int frameWidth, int frameHeight, int columns, int rows,
-                      int[] delays, int sourceWidth, int sourceHeight, boolean vector, Motion motion) {
+                      int[] delays, int sourceWidth, int sourceHeight, boolean vector, Motion motion,
+                      ImageSdg drawing) {
+
+    /** A picture that is not an SDG drawing: a still, an animation, or the first frame of a file that plays. */
+    public Picture(Object key, byte[] sheet, int frameWidth, int frameHeight, int columns, int rows, int[] delays,
+                   int sourceWidth, int sourceHeight, boolean vector, Motion motion) {
+        this(key, sheet, frameWidth, frameHeight, columns, rows, delays, sourceWidth, sourceHeight, vector, motion,
+                null);
+    }
 
     /** The longest side of a sheet. Every Vulkan device samples at least 4096. */
     public static final int SHEET_SIDE = 4096;
