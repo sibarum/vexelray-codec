@@ -57,7 +57,7 @@
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
 
         <!-- The stack, installed to the local .m2 from the sibling checkouts. -->
-        <vexelray.version>0.1.3-SNAPSHOT</vexelray.version>
+        <vexelray.version>0.2.0-SNAPSHOT</vexelray.version>
         <vexelray.gui.version>0.2.0-SNAPSHOT</vexelray.gui.version>
         <vexelray.framework.version>0.2.0-SNAPSHOT</vexelray.framework.version>
         <atchung.version>1.4-SNAPSHOT</atchung.version>
