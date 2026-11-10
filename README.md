@@ -67,6 +67,11 @@ dev.vexelray.codec.image.gui    on vexelray-gui.
                                 the side it came from, over a backdrop (dark, light, checker, magenta, green) for its
                                 transparent pixels, and posed by its caller: zoomed, moved and turned (Pose), as
                                 visual transforms.
+  Player                        a picture that plays, made into a vexelray-gui Feed: the frame contract's producer.
+                                Its own thread writes the frames ahead into three slots, stamped, and says the feed's
+                                time (Feed.time); a part's asked half shows feed.due(frame). Play, pause, hold, seek,
+                                step, loop and volume from any thread. No krono: what replaces Playback (step 5 of
+                                vexelray-gui's frame-contract.md, begun).
   Playback                      how a picture that plays is played: play, pause, seek, step, loop, volume, mute and
                                 compression, and what its sound was just heard as;
                                 paced by krono, its frames streamed through a GuiApp.stream, and held while the window
@@ -105,6 +110,13 @@ and size are the file's business: one canvas is decoded, a few frames are made a
 kept up to `Movie.BUDGET`. `ImageView.playback()` is the transport. Bytes in hand and resources, having no file to play
 from, are still packed whole into a sheet. What plays is whatever the motion's `Source` opens, a `Playable`, so a video
 plays through the same `Playback` (below).
+
+**On the frame contract: `Player`.** An application on 0.2 plays a picture through a feed rather than a widget. Where
+the poster is decoded (a `@Job`), `Player.feed(w, h, firstFrame)` makes a feed of three slots with the first frame
+handed over at stamp 0, so the answer is already a picture; the view shows the feed on a node, and starts
+`Player.play(feed, motion)` when it shows it. Its `@Draw` shows `feed.due(frame)` and answers `feed.next(frame)`, which
+is all the pacing there is on the GUI thread. Rasterware plays animated GIF, WebP and APNG this way. `ImageView` and
+`VideoView` move onto it next, and `Playback` goes.
 
 ### vexelray-codec-video
 
