@@ -17,7 +17,7 @@ import java.io.IOException;
  * ({@link Feed#time}). Whoever shows the feed asks it which frame is due ({@link Feed#due(dev.vexelray.gui.core.Frame)})
  * in its asked half, and when the next one will be; it holds no clock, and nothing of this runs on the GUI thread.
  *
- * <p><b>What it replaces.</b> {@link Playback} paced a picture on a krono shred that polled every few milliseconds,
+ * <p><b>What it replaces.</b> 0.1's {@code Playback} paced a picture on a krono shred that polled every few milliseconds,
  * and met the decoder and the transport in one locked object, then pushed each frame into a {@code StreamTexture}.
  * Here the pacing is the feed's time, the asked half's choice is a search over three stamps, and the thread only makes:
  * it sleeps until a slot comes free or a frame it waits for is made, and wakes at once when told something.
@@ -25,7 +25,9 @@ import java.io.IOException;
  * <p><b>Its stamps are the feed's time, in nanoseconds,</b> and only ever increase: round a loop the next pass is
  * stamped after the last, and a seek starts after everything handed over before it, whose frames it makes
  * {@linkplain Feed#stale stale}. So the frame due is always the latest stamped at or before the feed's time, and a frame
- * made for where it was is never shown after a seek.
+ * made for where it was is never shown after a seek. A pass always starts on a whole number of passes, a seek's too, so
+ * a stamp is so many passes and a time into one: {@link #positionOf} reads where in the file the feed's time is from
+ * the time alone, which is all an asked half drawing a seek bar has.
  *
  * <p><b>A late frame is dropped from a video, and waited for in an animated image</b> ({@link Playable#drops}). Waited
  * for, the feed's time is held until it is made, so a machine too slow for an animation plays it slower; dropped, the
@@ -107,8 +109,12 @@ public final class Player implements AutoCloseable {
     private long copyStamp;
     private byte[][] copyChain;
     private int copyGeneration;
+    /** Something a transport bar shows has changed since {@link #changed} was last run. */
+    private boolean owed;
+    /** Run on the player's thread, outside its lock, whenever what a transport bar shows has changed. */
+    private final Runnable changed;
 
-    private Player(Feed feed, Motion motion, Nanos nanos, Opener opener, boolean start) {
+    private Player(Feed feed, Motion motion, Nanos nanos, Opener opener, Runnable changed, boolean start) {
         if (feed.slots() < 2) {
             throw new IllegalArgumentException("a picture that plays needs a feed of " + SLOTS + " slots: " + feed);
         }
@@ -116,6 +122,7 @@ public final class Player implements AutoCloseable {
         this.motion = motion;
         this.nanos = nanos;
         this.opener = opener;
+        this.changed = changed == null ? () -> { } : changed;
         Thread t = Thread.ofPlatform().daemon().name("player " + motion.stamp().path().getFileName()).unstarted(this::run);
         this.thread = t;
         if (start) {
@@ -124,16 +131,34 @@ public final class Player implements AutoCloseable {
     }
 
     /**
-     * Play {@code motion}'s frames into {@code feed}, a feed {@link #feed} made, from its first frame, now. Opens the file
-     * on the player's own thread, so this returns at once.
+     * Play {@code motion}'s frames into {@code feed}, now: a feed {@link #feed} made, showing the first frame already, or
+     * an empty one, which shows nothing until the first frame is made. Opens the file on the player's own thread
+     * ({@link Motion#open}, so a motion's own {@code Source} says what plays), so this returns at once.
      */
     public static Player play(Feed feed, Motion motion) {
-        return new Player(feed, motion, System::nanoTime, Motion::open, true);
+        return play(feed, motion, null);
+    }
+
+    /**
+     * {@link #play(Feed, Motion)}, running {@code changed} whenever what a transport bar shows has changed: the frame
+     * handed over, playing or not, the loop, the volume, the end, a failure. On the player's own thread, outside its
+     * lock; keep it cheap. For a widget, which tells its own tree; an application hears its widget by message.
+     */
+    public static Player play(Feed feed, Motion motion, Runnable changed) {
+        return new Player(feed, motion, System::nanoTime, Motion::open, changed, true);
     }
 
     /** A player on a test's clock and frames, its thread not started: {@link #run} is called by the test. */
     static Player forTest(Feed feed, Motion motion, Nanos nanos, Opener opener) {
-        return new Player(feed, motion, nanos, opener, false);
+        return new Player(feed, motion, nanos, opener, null, false);
+    }
+
+    /**
+     * An empty feed for a picture that plays, of {@link #SLOTS} slots of {@code width x height}, nothing handed over: a
+     * player makes its first frame too. Cheap to make anywhere, a slot's memory being made when it is first written.
+     */
+    public static Feed feed(int width, int height) {
+        return Feed.of(width, height, SLOTS, true);
     }
 
     /**
@@ -250,6 +275,7 @@ public final class Player implements AutoCloseable {
         synchronized (lock) {
             this.volume = Math.max(0f, Math.min(1f, volume));
             sound();
+            tell();
         }
     }
 
@@ -258,6 +284,7 @@ public final class Player implements AutoCloseable {
         synchronized (lock) {
             this.muted = muted;
             sound();
+            tell();
         }
     }
 
@@ -266,6 +293,7 @@ public final class Player implements AutoCloseable {
         synchronized (lock) {
             this.compression = amount > 0f ? Math.min(1f, amount) : 0f;   // NaN is none
             sound();
+            tell();
         }
     }
 
@@ -329,6 +357,88 @@ public final class Player implements AutoCloseable {
         }
     }
 
+    /** Whether it is held ({@link #hold}). */
+    public boolean held() {
+        synchronized (lock) {
+            return held;
+        }
+    }
+
+    /** How many frames: the file's once open, what the motion said until then; at least one. */
+    public int count() {
+        synchronized (lock) {
+            return Math.max(1, movie != null ? movie.count() : motion.frames());
+        }
+    }
+
+    /** The frame due at the feed's time, from 0; 0 until the file is open. */
+    public int frame() {
+        synchronized (lock) {
+            return movie == null ? 0 : movie.frameAt(positionLocked());
+        }
+    }
+
+    /**
+     * Where in a pass the frame on screen is, in ms, as the renderer last chose it ({@link Feed#shown}), or -1 before
+     * any is shown: what a meter of the frames that reached the screen counts. Read from the GUI thread's last choice,
+     * so from another thread it may be a frame behind.
+     */
+    public long shown() {
+        int slot = feed.shown();
+        if (slot < 0) {
+            return -1;
+        }
+        return millisOf(feed.stamp(slot));
+    }
+
+    /**
+     * How far through a pass of {@code passMillis} the feed's time is at {@code frame}'s moment, from 0 to 1: a seek
+     * bar's place, for an asked half, which holds the feed and the length and nothing of the player. Exact because a
+     * pass always starts on a whole number of passes. 0 before the feed has a time. Static and allocating nothing.
+     */
+    public static float positionOf(Feed feed, dev.vexelray.gui.core.Frame frame, long passMillis) {
+        long now = feed.now(frame.monoNanos());
+        if (now >= Long.MAX_VALUE / 2 || passMillis <= 0) {
+            return 0f;
+        }
+        long pass = passMillis * MS;
+        return (float) Math.floorMod(now, pass) / pass;
+    }
+
+    /**
+     * Where in a pass a frame stamped {@code stamp} is, in ms: what an asked half that chose a slot ({@link Feed#due})
+     * says it showed. -1 for a negative stamp, which no frame has.
+     */
+    public long millisOf(long stamp) {
+        if (stamp < 0) {
+            return -1;
+        }
+        synchronized (lock) {
+            long d = durationLocked();
+            long ms = (stamp - seenPass) / MS;
+            return d > 0 ? Math.floorMod(ms, d) : Math.max(0, ms);
+        }
+    }
+
+    /** When frame {@code i} starts, in ms into a pass; 0 until the file is open. */
+    public long startOf(int i) {
+        synchronized (lock) {
+            return movie == null ? 0 : movie.startOf(Math.max(0, Math.min(i, movie.count() - 1)));
+        }
+    }
+
+    /**
+     * Copy what its sound last gave the speaker into {@code stereo}, oldest first, left and right in turn, for a meter:
+     * the sample frames copied. None when there is no sound to hear.
+     */
+    public int heard(float[] stereo) {
+        Playable.Clock own;
+        synchronized (lock) {
+            own = movie == null ? null : movie.clock();
+        }
+        return own == null ? 0 : own.heard(stereo);
+    }
+
     public Feed feed() {
         return feed;
     }
@@ -353,7 +463,9 @@ public final class Player implements AutoCloseable {
 
     /** Open the file, then make frames until closed. The player's own thread. */
     void run() {
-        if (!open()) {
+        boolean opened = open();
+        changed.run();
+        if (!opened) {
             return;
         }
         try {
@@ -361,6 +473,14 @@ public final class Player implements AutoCloseable {
                 long sleep = once();
                 if (sleep < 0) {
                     break;
+                }
+                boolean fire;
+                synchronized (lock) {
+                    fire = owed;
+                    owed = false;
+                }
+                if (fire) {
+                    changed.run();
                 }
                 synchronized (lock) {
                     if (sleep > 0 && !told) {
@@ -380,6 +500,7 @@ public final class Player implements AutoCloseable {
             }
         } finally {
             shut();
+            changed.run();
         }
     }
 
@@ -443,14 +564,22 @@ public final class Player implements AutoCloseable {
             if (own != null) {
                 own.seek(0);
             }
-            // The first frame is on screen already, at stamp 0: the time starts there, now, unless a seek is waiting.
-            lastStamp = 0;
             makePass = 0;
             seenPass = 0;
-            next = m.count() > 1 ? 1 : 0;
-            boolean runs = runsLocked();
-            feed.time(nanos.now(), 0L, runs);
-            clockRuns(m, runs);
+            if (feed.newest() >= 0) {
+                // The first frame is on screen already, at stamp 0 (a job's): the time starts there, now.
+                lastStamp = 0;
+                next = m.count() > 1 ? 1 : 0;
+                boolean runs = runsLocked();
+                feed.time(nanos.now(), 0L, runs);
+                clockRuns(m, runs);
+            } else {
+                // An empty feed: the first frame is made here too, and the time waits at 0 until it is.
+                lastStamp = -1;
+                next = 0;
+                waiting = true;
+                feed.time(nanos.now(), 0L, false);
+            }
             return true;
         }
     }
@@ -515,6 +644,7 @@ public final class Player implements AutoCloseable {
             if (next >= m.count()) {
                 // The file stopped decoding before this frame: it is never coming. Stopped where it is, as at the end.
                 ended = true;
+                owed = true;
                 wanted = false;
                 retime();
                 return Long.MAX_VALUE / 2;
@@ -554,6 +684,7 @@ public final class Player implements AutoCloseable {
             return;
         }
         feed.handOver(slot, stamp);
+        owed = true;
         lastStamp = stamp;
         if (waiting) {
             // The frame the time waited for is here: it runs on from it, now.
@@ -575,9 +706,12 @@ public final class Player implements AutoCloseable {
     private void goTo(Playable m, long ms) {
         generation++;
         int to = m.frameAt(ms);
-        long first = lastStamp + 1;
-        makePass = first - m.startOf(to) * MS;
+        // A new pass, after everything handed over, starting on a whole number of passes: so a stamp is always so many
+        // passes and a time into one, and the feed's time alone says where in the file it is (a seek bar's).
+        long pass = Math.max(1, m.duration()) * MS;
+        makePass = (Math.floorDiv(Math.max(lastStamp, 0L), pass) + 1) * pass;
         seenPass = makePass;
+        long first = makePass + m.startOf(to) * MS;
         next = to;
         feed.stale(first);
         long at = makePass + ms * MS;
@@ -630,6 +764,7 @@ public final class Player implements AutoCloseable {
         }
         if (!ended) {
             ended = true;
+            owed = true;
             wanted = false;
             feed.time(nanos.now(), end - 1, false);
             clockRuns(m, false);
@@ -708,6 +843,7 @@ public final class Player implements AutoCloseable {
     /** Wake the thread to look again. Under the lock. */
     private void tell() {
         told = true;
+        owed = true;
         lock.notifyAll();
     }
 

@@ -183,6 +183,27 @@ class PlayerTest {
     }
 
     @Test
+    void fromAnEmptyFeedItMakesTheFirstFrameTooAndTheTimeWaitsForIt() {
+        Strip s = new Strip(4, 10, false);
+        s.ready.clear(0);
+        Motion motion = new Motion(new Stamp(Path.of("strip.gif"), 1, 1), 4, 40, 0);
+        Player p = Player.forTest(Player.feed(W, H), motion, () -> now, (m, side) -> s);
+        assertTrue(p.open());
+        Feed f = p.feed();
+        assertEquals(-1, f.newest(), "nothing is shown until the first frame is made");
+        assertFalse(f.running());
+        now = 30 * MS;
+        assertTrue(p.once() > 0);
+        assertEquals(0L, f.now(now), "the time waits at the start");
+        s.ready.set(0);
+        assertEquals(0L, p.once());
+        assertTrue(f.running(), "the first frame is here: the time runs from it, now");
+        assertEquals(1, dueNow(f));
+        assertEquals(0L, p.once());
+        assertEquals(2, dueAt(f, 40));
+    }
+
+    @Test
     void roundALoopTheStampsGoOnIncreasing() {
         Strip s = new Strip(3, 10, false);
         Player p = player(s);
@@ -236,6 +257,8 @@ class PlayerTest {
         assertTrue(f.running(), "its frame is here: the time runs on");
         assertEquals(8, dueNow(f), "frame 7 is the one due");
         assertEquals(70L, p.position());
+        assertEquals(0.7f, Player.positionOf(f, new Frame(now, now, false), 100), 1e-4f,
+                "a seek starts on a whole pass, so the feed's time alone says where it is");
     }
 
     @Test

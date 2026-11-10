@@ -1,8 +1,13 @@
 # video-player-demo
 
-The smallest application that plays a video: one `VideoView` filling a window, looping, opened with
-`Videos.open(path, 1920)` on `gui.offload()` once `ImageStarter`'s textures have the device. It is here to see
+The smallest application on 0.2 that plays a video, with its sound: one `VideoView` filling a window, looping. Once
+the window is open, the `Probe` job looks at the file the command line named (`Videos.probe(path, 1920)`) and answers
+with it as values; the `Screen` view plays that, and the view's player opens the file again on its own thread. The keys
+are declared with the messages they send, and a `Timer` beats the meter once a second. It is here to see
 `vexelray-codec-video` on a real GPU and to drive it with `ottermate`, which the module's headless tests cannot do.
+
+A background run plays its sound on the speakers like any other; for one nobody should hear, add
+`"-Dapp.jvmArgs=-Dvexelray.sound=nowhere"`.
 
 Not a module of `vexelray-codec`: installing the library never builds an application. Install the codec modules first
 (`mvn install` in the parent), then:
@@ -41,6 +46,6 @@ ottermate --script play.txt --launch mvn.cmd compile exec:exec -Dautomation=0 "-
 An `await` gives up after 30 s, so wait for a clock time at most that far ahead. `shown 0.0 fps` rather than
 `0.0 fps`, which `30.0 fps` also contains.
 
-The fps readout polls `VideoView.shownMicros` every millisecond, so it can miss a frame now and then. For an exact count
-use the probe beside the log (`target/logs/video-player-demo-probe.csv`): each frame the window drew is a
-`frame.present` row without a `draw skipped` row before it.
+The fps readout is `VideoView.framesShown`, the distinct frames the view's asked half chose at the frames the window
+drew, over the time since the last beat: exact, not sampled. It is the number vexelray-gui's `frame-contract.md` step 5
+records (24, 30 and 60 fps clips, each held within a frame a second).

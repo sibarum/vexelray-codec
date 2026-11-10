@@ -45,8 +45,8 @@ dev.vexelray.codec.image        pixels, and no GUI type. Blocking: run on Gui.of
                                 and the Source that opens it (a Movie by default; a video's Footage); and whether,
                                 fitted, it fills its stage beyond its own pixels (a video does; an animation never).
   Playable                      frames by number, each with its time, made ahead on a thread of their own: what a
-                                Playback plays. Movie is one; vexelray-codec-video's Footage is another. One may keep
-                                a Clock of its own (a video's sound), which Playback then keeps time by.
+                                Player plays. Movie is one; vexelray-codec-video's Footage is another. One may keep
+                                a Clock of its own (a video's sound), which the Player then keeps time by.
   Glimpses                      single frames of a file that plays, by time, from a file of their own, the latest ask
                                 winning: what a timeline shows under the pointer. Motion.glimpses opens them, for a
                                 Source that has them (a video's; an animation's has none).
@@ -70,12 +70,9 @@ dev.vexelray.codec.image.gui    on vexelray-gui.
   Player                        a picture that plays, made into a vexelray-gui Feed: the frame contract's producer.
                                 Its own thread writes the frames ahead into three slots, stamped, and says the feed's
                                 time (Feed.time); a part's asked half shows feed.due(frame). Play, pause, hold, seek,
-                                step, loop and volume from any thread. No krono: what replaces Playback (step 5 of
-                                vexelray-gui's frame-contract.md, begun).
-  Playback                      how a picture that plays is played: play, pause, seek, step, loop, volume, mute and
-                                compression, and what its sound was just heard as;
-                                paced by krono, its frames streamed through a GuiApp.stream, and held while the window
-                                is unfocused.
+                                step, loop, volume, mute and compression from any thread, and what its sound was just
+                                heard as. No krono and no lock the GUI thread waits on: what replaced 0.1's Playback
+                                (step 5 of vexelray-gui's frame-contract.md). positionOf is a seek bar's place.
   ImageStarter                  for a framework application: Textures, bound to the window and unbound at shutdown.
 ```
 
@@ -104,19 +101,21 @@ final class Recipes {
 An application that wants another budget writes its own `@Provides Textures`, and the starter's backs off.
 
 **A file that plays is a movie, not a sheet.** `Pictures.of(path, ...)` decodes only the first frame of an animated GIF,
-WebP or APNG and gives it a `Motion`; `ImageView` shows that frame, opens a `Movie` from the file, and plays it
-through a `StreamTexture`, a few slots made once and written in turn, so a frame costs a copy and no texture. Its length
-and size are the file's business: one canvas is decoded, a few frames are made ahead, and the frames already made are
-kept up to `Movie.BUDGET`. `ImageView.playback()` is the transport. Bytes in hand and resources, having no file to play
-from, are still packed whole into a sheet. What plays is whatever the motion's `Source` opens, a `Playable`, so a video
-plays through the same `Playback` (below).
+WebP or APNG and gives it a `Motion`; `ImageView` shows that frame, and a `Player` plays the file into a feed of three
+slots shown over it, so a frame costs a copy and no texture. Its length and size are the file's business: one canvas
+is decoded, a few frames are made ahead, and the frames already made are kept up to `Movie.BUDGET`.
+`ImageView.playback()` is the transport, the `Player`. Bytes in hand and resources, having no file to play from, are
+still packed whole into a sheet. What plays is whatever the motion's `Source` opens, a `Playable`, so a video plays
+through the same `Player` (below).
 
-**On the frame contract: `Player`.** An application on 0.2 plays a picture through a feed rather than a widget. Where
-the poster is decoded (a `@Job`), `Player.feed(w, h, firstFrame)` makes a feed of three slots with the first frame
-handed over at stamp 0, so the answer is already a picture; the view shows the feed on a node, and starts
-`Player.play(feed, motion)` when it shows it. Its `@Draw` shows `feed.due(frame)` and answers `feed.next(frame)`, which
-is all the pacing there is on the GUI thread. Rasterware plays animated GIF, WebP and APNG this way. `ImageView` and
-`VideoView` move onto it next, and `Playback` goes.
+**On the frame contract.** The player paces nothing on the GUI thread: its own thread writes the frames ahead, stamped,
+and keeps the feed's time (vexelray-gui's `Feed.time`), and whoever shows the feed picks the frame due in an asked
+half: `feed.due(frame)` shown, `feed.next(frame)` answered. `ImageView` and `VideoView` register their own through
+`Seams.ask`, the widget library's seam. An application that shows pictures itself does it in its `@Draw`: where the
+poster is decoded (a `@Job`), `Player.feed(w, h, firstFrame)` makes the feed with the first frame handed over at
+stamp 0, so the answer is already a picture; the view shows it on a node and starts `Player.play(feed, motion)` when
+it shows it. Rasterware plays animated GIF, WebP and APNG, and videos, this way. A picture that plays is not mirrored by
+a pose: `Node.image(Feed)` takes no region.
 
 ### vexelray-codec-video
 
@@ -131,75 +130,77 @@ dev.vexelray.codec.video        frames, and no GUI type. Videos blocks: run it o
                                 the late ones dropped; a seek replaces the queue. Owns and closes the clip.
   Footage                       a Clip as a Playable: frames by number at the stream's rate, each given its mip chain
                                 on its own thread, a few ahead and the rest kept within a budget; forward by decoding,
-                                anywhere else by an exact seek. What plays a video on an ImageView. Opens the
+                                anywhere else by an exact seek. What a Player plays a video from. Opens the
                                 file's sound too, when there is one and a speaker, and gives it as its Clock.
+  Probed, VideoFile             what Videos.probe makes of a file, as values a job can send: a video that plays (its
+                                stamp, size, length, rate, whether it has sound), or none and why. Nothing is open.
   VideoGlimpses                 a video's Glimpses: the file opened again, small, its frames made by number on a thread
                                 of their own; forward by decoding, anywhere else by an exact seek; the last 64 kept.
   Sound                         (package-private) the sound as that Clock: the time being heard, and by the wall
                                 past the sound's end; its volume and compression.
 
 dev.vexelray.codec.video.gui    on vexelray-gui.
-  VideoView                     one clip on a node, fitted and enlarged to its stage, paced by a krono shred: play,
-                                pause, resume, exact seek, loop, onEnd. A texture per frame (Textures.upload), the one
-                                before given back (Textures.release), one upload in flight at a time.
+  VideoView                     one video on a node, fitted and enlarged to its stage, played by a Player into a feed
+                                and shown by its own asked half: play, pause, resume, exact seek, loop, onEnd. A
+                                VideoFile plays with its sound; a Clip handed in, its pictures only.
 ```
 
-Video uses the image module's `Textures`, so an application that plays videos names `ImageStarter` and no starter of
-its own:
+An open `Clip` cannot cross the bus, so on 0.2 a `@Job` looks at the file and answers with values, and the view plays
+those; its player opens the file again on a thread of its own:
 
 ```java
-@Provides
-VideoView player(Gui gui, KronoGui krono, Textures textures) {
-    VideoView view = new VideoView(gui, krono, textures, Length.ZERO, Length.ZERO);
-    gui.offload().execute(() -> {
-        Opened o = Videos.open(Path.of("clip.mp4"), 1920);
-        if (o.video()) {
-            view.play(o.clip());       // the view owns the clip now
-        }
-    });
-    return view;
+// The job, on the offload lane:
+public Looked run(Look l) {
+    return new Looked(Videos.probe(path, 1920));      // a Probed: the VideoFile, or why not
+}
+
+// The @View that hears it:
+@Subscribe
+public void looked(Looked l) {
+    l.probed().video().ifPresent(view::play);         // view = new VideoView(gui, Length.ZERO, Length.ZERO)
 }
 ```
 
-A texture is never rewritten (`GuiApp.texture`), so a frame on screen is a texture made for it and given back after
-the next one lands. At 1080p and 30 fps that is about 250 MB a second through staging. That works, but it is the cost
-to watch: open a clip at the side it is shown at, not at its own size. A GPU-side YUV path, uploading planes and
-converting in the shader, would cut it by more than half and needs nothing new from the wrapper.
+`demos/video-player` is that application whole, with its keys, and a meter of the frames that reached the screen.
+
+A frame on screen is a slot of the feed, copied to the GPU when it is shown: at 1080p and 30 fps about 250 MB a second
+through staging. That works, but it is the cost to watch: open a video at the side it is shown at, not at its own
+size. A GPU-side YUV path, uploading planes and converting in the shader, would cut it by more than half and needs
+nothing new from the wrapper.
 
 **Or as a picture that plays.** `Videos.poster(path, side, true)` is the video's first frame carrying a `Motion` whose
-source is `Footage.SOURCE`, so an `ImageView` plays it exactly as it plays an animated GIF: `Playback`'s transport,
-stepping a frame at a time, looping, holding while the window is unfocused, and posed, zoomed and turned with the
-picture. One difference: fitted, a video fills its stage, as a player shows it, where a still or a GIF smaller than
-the stage is shown at its own size; the motion says so (`Motion.fills`, read through `Picture.enlarges`), so the
-viewer needs nothing from this module to tell them apart. The frames go through a `StreamTexture` rather than a
-texture each. A viewer that shows pictures and videos side by side (Rasterware) wants this; a player with nothing but video
-can keep `VideoView`.
+source is `Footage.SOURCE`, so an `ImageView` plays it exactly as it plays an animated GIF: the `Player`'s transport,
+stepping a frame at a time, looping, holding while the window is unfocused, and zoomed and turned with the picture.
+One difference: fitted, a video fills its stage, as a player shows it, where a still or a GIF smaller than the stage
+is shown at its own size; the motion says so (`Motion.fills`, read through `Picture.enlarges`), so the viewer needs
+nothing from this module to tell them apart. A viewer that shows pictures and videos side by side (Rasterware) wants
+this; a player with nothing but video can keep `VideoView`.
 
-**With its sound.** A picture that plays a video plays its sound too: `Footage.open` opens the file's sound on the
-speakers (`ffmpeg-wrapper`'s `Audio`), and gives it to `Playback` as the playable's own clock (`Playable.clock`). The
-frames then follow the sound: the shred shows the frame the sound being heard has reached, rather than counting time
-itself, because a speaker plays at its own pace and a picture can always be shown a little early or late. The sound
-starts with the first frame, stops with every pause, hold, step and end, and goes wherever a seek or a loop sends the
-pictures. Where the sound ends before the pictures, or the device is lost, the clock runs on by the wall. A file with no
-sound, or a machine with no sound device, plays silently on `Playback`'s own clock, as before. The system property
-`vexelray.sound` says where sound goes: `speakers` (the default), `nowhere` (played in real time to no device, the
-clock and all: what the build's tests use, so a test run is quiet), or `off`. `VideoView` plays pictures only.
+**With its sound.** A video plays its sound too: `Footage.open` opens the file's sound on the speakers
+(`ffmpeg-wrapper`'s `Audio`), and gives it to the `Player` as the playable's own clock (`Playable.clock`). The frames
+then follow the sound: the player says the feed's time again from the sound whenever the two drift apart by more than
+2 ms, rather than counting time itself, because a speaker plays at its own pace and a picture can always be shown a
+little early or late. The sound starts with the first frame, stops with every pause, hold, step and end, and goes
+wherever a seek or a loop sends the pictures. Where the sound ends before the pictures, or the device is lost, the
+clock runs on by the wall. A file with no sound, or a machine with no sound device, plays silently on the machine's
+clock. The system property `vexelray.sound` says where sound goes: `speakers` (the default), `nowhere` (played in real
+time to no device, the clock and all: what the build's tests use, so a test run is quiet), or `off`.
 
-**How loud.** `Playback.volume` (0 to 1, the file's own level by default) and `Playback.muted` set how loud the sound is
+**How loud.** `Player.volume` (0 to 1, the file's own level by default) and `Player.muted` set how loud the sound is
 heard, through `Playable.Clock.volume` (nothing, for a clock with nothing to hear) to `Audio.volume`; muted, the clock
 keeps time all the same. Both are kept while the file is still opening and given to the sound once it is, and
-`Playback.sounds` says whether there is any to hear, which is what a volume control is shown for. `ImageView.volume`
+`Player.sounds` says whether there is any to hear, which is what a volume control is shown for. `ImageView.volume`
 and `ImageView.muted` give them to the picture playing and to every one shown after it, so a viewer keeps its level
 from one video to the next.
 
-**How even.** `Playback.compression` and `ImageView.compression` are the night-mode knob, 0 to 1 and 0 by default.
+**How even.** `Player.compression` and `ImageView.compression` are the night-mode knob, 0 to 1 and 0 by default.
 They are kept and handed down the same way, through `Playable.Clock.compression` to `Audio.compression`:
 - 0.25 tames only the extremes;
 - 0.5 is night mode;
 - 1 is deliberately too much.
 
 The clock keeps time exactly as without, so the pictures stay with the sound, and a turn of the knob is heard at once.
-`Playback.heard` copies what the sound last gave the speaker, through `Playable.Clock.heard`, for a meter. See
+`Player.heard` copies what the sound last gave the speaker, through `Playable.Clock.heard`, for a meter. See
 *vexelray-codec-audio* below, and `ffmpeg-wrapper`'s README, *Compression*.
 
 ### vexelray-codec-record

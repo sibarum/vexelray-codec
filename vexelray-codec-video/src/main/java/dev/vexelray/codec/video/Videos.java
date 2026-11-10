@@ -85,6 +85,27 @@ public final class Videos {
     }
 
     /**
+     * What {@code path} is as a video that plays, at most {@code side} on its long side (0 for its own size): opened,
+     * looked at and closed again, so the answer is values a job can send ({@link Probed}). A file that is not a video,
+     * or does not say how long it is or how fast it plays, has no video and says why. Blocking: run it in a
+     * {@code @Job}.
+     */
+    public static Probed probe(Path path, int side) {
+        Opened o = open(path, side);
+        if (!o.video()) {
+            return new Probed(path, java.util.Optional.empty(), o.identity());
+        }
+        try (Clip c = o.clip()) {
+            VideoInfo info = c.info();
+            if (!Footage.plays(info)) {
+                return new Probed(path, java.util.Optional.empty(), "a video with no length or rate");
+            }
+            return new Probed(path, java.util.Optional.of(new VideoFile(c.stamp(), side, c.width(), c.height(),
+                    info.durationMicros(), info.frameRate(), info.audio(), o.identity())), o.identity());
+        }
+    }
+
+    /**
      * {@code path}, opened with its frames at most {@code side} on their long side (0 for its own size), ready to play
      * from the start. The clip is the caller's to close, or to hand to a {@link Reel}, which closes it.
      */

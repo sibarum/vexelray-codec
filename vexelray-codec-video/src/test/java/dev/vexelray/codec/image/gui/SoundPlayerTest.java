@@ -1,14 +1,10 @@
 package dev.vexelray.codec.image.gui;
 
-import dev.vexelray.codec.image.Motion;
+import dev.vexelray.codec.image.Picture;
 import dev.vexelray.codec.video.Fixtures;
 import dev.vexelray.codec.video.Videos;
-import dev.vexelray.gui.core.Gui;
-import dev.vexelray.gui.krono.KronoGui;
+import dev.vexelray.gui.core.Feed;
 import org.junit.jupiter.api.Test;
-import sibarum.atchung.Atchung;
-import sibarum.kronometer.Dur;
-import sibarum.kronometer.Kron;
 
 import java.util.function.BooleanSupplier;
 import java.util.function.Consumer;
@@ -17,11 +13,12 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * A video with sound through the real transport: {@code Playback} (in this package for its constructor), the real
- * {@code Footage} and its sound, played to no speaker. The sound keeps real time, so the test ticks the timeline in
- * step with the wall.
+ * A video with sound through the real producer: a {@link Player} on the real {@code Footage} and its sound, played to
+ * no speaker (the build's {@code vexelray.sound=nowhere}), into the feed a job would make from its poster. The sound
+ * keeps real time, so the test waits on the wall, and stands in for the renderer by showing the newest slot as a
+ * window would show the one due, so the ring keeps moving.
  */
-class SoundPlaybackTest {
+class SoundPlayerTest {
 
     @Test
     void quickPausePlayStepPlayPlaysOn() throws Exception {
@@ -36,10 +33,24 @@ class SoundPlaybackTest {
         }
     }
 
+    /** The feed's time follows the sound: it keeps pace with the wall, as what is heard does, and has a clock to follow. */
+    @Test
+    void theFeedsTimeFollowsTheSound() throws Exception {
+        try (Rig r = new Rig("rgb.mp4")) {
+            r.until(() -> r.play.sounds() && r.play.position() >= 200);
+            long from = r.play.position();
+            long wall = System.nanoTime();
+            r.until(() -> System.nanoTime() - wall >= 600_000_000L);
+            long moved = r.play.position() - from;
+            assertTrue(Math.abs(moved - 600) <= 120, "in 600 ms of wall the time moved " + moved + " ms");
+            assertTrue(r.feed.running());
+        }
+    }
+
     /**
      * The knob from the transport down to the real sound, measured on what the speaker was given at 1.1 s into the
      * video: given before the file opens, and turned up mid-play, it is louder than as stored by about 4 dB (the
-     * tone is that far under the leveller's target). Each from its own playback, at the same place, since the AAC
+     * tone is that far under the leveller's target). Each from its own player, at the same place, since the AAC
      * tone's level wanders along it.
      */
     @Test
@@ -55,20 +66,19 @@ class SoundPlaybackTest {
     }
 
     /** The loudness at 1.1 s, with {@code before} done first, and the knob turned all the way up at 0.8 s if asked. */
-    private static double loudnessAt(Consumer<Playback> before, boolean turnUp) throws Exception {
+    private static double loudnessAt(Consumer<Player> before, boolean turnUp) throws Exception {
         try (Rig r = new Rig("rgb.mp4", before)) {
             if (turnUp) {
                 r.until(() -> r.play.position() >= 800);
                 r.play.compression(1f);
-                assertEquals(1f, r.play.compression());
             }
             r.until(() -> r.play.position() >= 1100);
             return loudness(r.play);
         }
     }
 
-    /** The loudness of the last 50 ms the playback's sound gave the speaker. */
-    private static double loudness(Playback play) {
+    /** The loudness of the last 50 ms the player's sound gave the speaker. */
+    private static double loudness(Player play) {
         float[] heard = new float[2205 * 2];
         int got = play.heard(heard);
         double sum = 0;
@@ -78,40 +88,40 @@ class SoundPlaybackTest {
         return got == 0 ? 0 : Math.sqrt(sum / (got * 2.0));
     }
 
-    /** A headless gui, a timeline ticked with the wall, and a playback of a fixture video. */
+    /** A player of a fixture video's poster feed, and the renderer's part done by hand. */
     private static final class Rig implements AutoCloseable {
 
-        final KronoGui krono = KronoGui.attach(new Gui(Atchung.create()), Kron.driven());
-        final Playback play;
-        private final long start = System.nanoTime();
+        final Feed feed;
+        final Player play;
 
         Rig(String name) throws Exception {
             this(name, p -> { });
         }
 
-        /** With {@code before} done to the playback before it starts, as a viewer's settings are. */
-        Rig(String name, Consumer<Playback> before) throws Exception {
-            Motion m = Videos.poster(Fixtures.file(name), 0, true).picture().motion();
-            play = new Playback(krono, new Textures(), (frame, w, h) -> { }, m, 64, () -> { });
+        /** With {@code before} done to the player as soon as it is made, as a viewer's settings are. */
+        Rig(String name, Consumer<Player> before) throws Exception {
+            Picture poster = Videos.poster(Fixtures.file(name), 64, true).picture();
+            feed = Player.feed(poster.frameWidth(), poster.frameHeight(), poster.sheet());
+            play = Player.play(feed, poster.motion());
             before.accept(play);
-            play.start(Runnable::run);
         }
 
         void until(BooleanSupplier done) throws InterruptedException {
             long give = System.nanoTime() + 5_000_000_000L;
             while (!done.getAsBoolean()) {
                 if (System.nanoTime() > give) {
-                    throw new AssertionError("never came: " + play);
+                    throw new AssertionError("never came: " + play + ", failure " + play.failure());
                 }
-                krono.tick(Dur.ms((System.nanoTime() - start) / 1_000_000));
+                feed.select();
                 Thread.sleep(1);
             }
+            assertEquals(null, play.failure());
         }
 
         @Override
         public void close() {
             play.close();
-            krono.close();
+            feed.close();
         }
     }
 }

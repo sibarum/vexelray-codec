@@ -3,6 +3,9 @@ package dev.vexelray.codec.image.gui;
 import dev.vexelray.codec.image.Picture;
 import dev.vexelray.canvas.Color;
 import dev.vexelray.canvas.ImageFilter;
+import dev.vexelray.gui.core.Drawn;
+import dev.vexelray.gui.core.Feed;
+import dev.vexelray.gui.core.Frame;
 import dev.vexelray.gui.core.Gui;
 import dev.vexelray.gui.core.ImageRegion;
 import dev.vexelray.gui.core.Node;
@@ -148,6 +151,10 @@ public final class ImageView {
     /** The layer showing the newest picture, and the one it is replacing. Swapped by {@link #show}; guarded by this. */
     private Layer front;
     private Layer back;
+    /** Both layers, in no order: what the asked half reads, with no lock. */
+    private final Layer[] layers;
+    /** How soon the asked half looks again while a picture's first frame is still being made: about a frame. */
+    static final long FIRST_FRAME_LOOK_NANOS = 16_000_000L;
 
     /** Bumped by every transition and by {@link #clear}, so a stale ramp stops writing. */
     private final AtomicInteger transition = new AtomicInteger();
@@ -179,6 +186,7 @@ public final class ImageView {
         this.textures = textures;
         this.back = new Layer();
         this.front = new Layer();
+        this.layers = new Layer[] {back, front};
         // The em in px, which a pose's offset is drawn in (Node.translate): one em of nothing, measured.
         Node ruler = gui.box().size(Length.rem(1f), Length.ZERO).floatAt(Length.ZERO, Length.ZERO).hitInert(true);
         this.stage = gui.column().width(Length.FILL).height(Length.FILL).clip(true).scroll(false, false)
@@ -201,6 +209,9 @@ public final class ImageView {
                 }
             }
         });
+        // A picture that plays shows the frame due by this widget's asked half, which is the widget library's to
+        // register (Seams.ask): asked on every frame the tree runs, and due again only while a frame is coming.
+        Seams.of(gui).ask(this::draw);
         // A picture that plays is held while its window is not focused, minimised included, and plays on when it is.
         gui.bus().subscribe(gui.input(), e -> {
             if (e instanceof InputEvent.FocusChanged f) {
@@ -215,6 +226,37 @@ public final class ImageView {
 
     public Node node() {
         return well;
+    }
+
+    /**
+     * The asked half (vexelray-gui's frame contract): for each layer playing a picture, the frame its feed says is due
+     * now, over the poster, which is hidden once a frame is due and shown while none is (before the first, a feed draws a
+     * placeholder); and when the next frame is. A still layer shows its plate. Reads only the layers' volatile feeds, and
+     * allocates nothing. GUI thread.
+     */
+    long draw(Frame frame, Drawn out) {
+        long due = Frame.NEVER;
+        for (Layer l : layers) {
+            Feed f = l.playing;
+            if (f == null) {
+                out.opacity(l.plate, 1f);
+                continue;
+            }
+            int slot = f.due(frame);
+            if (slot >= 0) {
+                out.show(f, slot);
+                out.opacity(l.moving, 1f);
+                out.opacity(l.plate, 0f);
+                due = Math.min(due, f.next(frame));
+            } else {
+                // Its first frame is still being made. A node drawn at nothing may never be drawn, and so never hear
+                // the hand-over that would wake it, so it looks again a frame on until there is one.
+                out.opacity(l.moving, 0f);
+                out.opacity(l.plate, 1f);
+                due = Math.min(due, frame.presentNanos() + FIRST_FRAME_LOOK_NANOS);
+            }
+        }
+        return due;
     }
 
     /** Show {@code p} at once, with no transition. */
@@ -277,8 +319,8 @@ public final class ImageView {
      * seek, step and loop. Null for a still, and before the picture's texture has come. A picture that plays starts
      * playing as soon as it is shown, round and round.
      */
-    public synchronized Playback playback() {
-        return front.playback;
+    public synchronized Player playback() {
+        return front.player;
     }
 
     /**
@@ -312,7 +354,7 @@ public final class ImageView {
 
     /**
      * Dynamic range compression on pictures that play, one knob from 0 (the default) to 1: the one playing now, and
-     * every one shown after it, as the {@link #volume} is. See {@link Playback#compression}.
+     * every one shown after it, as the {@link #volume} is. See {@link Player#compression}.
      */
     public void compression(float amount) {
         this.compression = amount > 0f ? Math.min(1f, amount) : 0f;     // NaN is none
@@ -361,6 +403,10 @@ public final class ImageView {
         for (Layer l : List.of(front, back)) {
             if (l.picture != null && l.textureW > 0) {
                 l.plate.imageFilter(filter, l.textureW, l.textureH);
+            }
+            Feed fd = l.playing;
+            if (fd != null) {
+                l.moving.imageFilter(filter, fd.width(), fd.height());
             }
         }
     }
@@ -540,7 +586,14 @@ public final class ImageView {
         volatile Picture picture;
         private Scheduled animation;
         /** How the picture plays, if it is the poster of a file that does; null otherwise and until its texture comes. */
-        Playback playback;
+        Player player;
+        /**
+         * The feed the player makes the frames in, which {@link #moving} shows over the poster; null when nothing plays.
+         * Read by the view's asked half on the GUI thread, so volatile: it reads no lock.
+         */
+        volatile Feed playing;
+        /** The frames of a picture that plays, over the plate, which shows its poster until the first frame is due. */
+        final Node moving;
         /** The size of the texture on the plate, which the filter is told: the sheet, or the stream's frames. */
         int textureW;
         int textureH;
@@ -575,8 +628,10 @@ public final class ImageView {
             // edges lie past the stage, where nothing is seen.
             this.detail = gui.box().size(Length.ZERO, Length.ZERO).corner(corner).floatAt(Length.ZERO, Length.ZERO)
                     .hitInert(true).visible(false);
+            this.moving = gui.box().size(Length.percent(100f), Length.percent(100f)).corner(corner)
+                    .floatAt(Length.ZERO, Length.ZERO).hitInert(true).visible(false);
             this.frame = gui.column().size(Length.ZERO, Length.ZERO).corner(corner).scroll(false, false)
-                    .floatAt(Length.ZERO, Length.ZERO).hitInert(true).visible(false).children(plate, detail);
+                    .floatAt(Length.ZERO, Length.ZERO).hitInert(true).visible(false).children(plate, moving, detail);
         }
 
         /** Make this the layer for {@code p}, showing nothing until its texture comes. The generation to expect. */
@@ -600,17 +655,14 @@ public final class ImageView {
         void texture(int g, Picture p, SampledImage texture) {
             showing(texture, p.sheetWidth(), p.sheetHeight());
             if (p.plays()) {
-                int side = Math.max(p.frameWidth(), p.frameHeight());
-                playback = new Playback(krono, textures, (frame, w, h) -> {
-                    synchronized (ImageView.this) {
-                        if (current(g)) {
-                            showing(frame, w, h);
-                        }
-                    }
-                }, p.motion(), side, () -> onPlayback.run());
-                playback.hold(!focused);
+                // The frames go into a feed of their own, shown over the poster by the view's asked half once the first
+                // is due (ImageView.draw): the player makes them on its own thread, and nothing here paces them.
+                Feed f = Player.feed(p.frameWidth(), p.frameHeight());
+                moving.image(f).imageFilter(filter, f.width(), f.height()).visible(true);
+                player = Player.play(f, p.motion(), () -> onPlayback.run());
+                playing = f;
+                player.hold(!focused);
                 sound();
-                playback.start();
                 return;
             }
             if (!p.animated()) {
@@ -676,17 +728,17 @@ public final class ImageView {
 
         /** Give the picture's playing the view's volume, mute and compression. */
         void sound() {
-            if (playback != null) {
-                playback.volume(volume);
-                playback.muted(muted);
-                playback.compression(compression);
+            if (player != null) {
+                player.volume(volume);
+                player.muted(muted);
+                player.compression(compression);
             }
         }
 
         /** Hold the picture's playing, or let it go: for a window that is not focused. */
         void hold(boolean hold) {
-            if (playback != null) {
-                playback.hold(hold);
+            if (player != null) {
+                player.hold(hold);
             }
         }
 
@@ -708,9 +760,17 @@ public final class ImageView {
                 animation.cancel();
                 animation = null;
             }
-            if (playback != null) {
-                playback.close();
-                playback = null;
+            if (player != null) {
+                player.close();
+                player = null;
+            }
+            Feed f = playing;
+            if (f != null) {
+                // No node names it from here, and its owner closes it: each renderer lets its texture go once no
+                // frame in flight samples it.
+                playing = null;
+                moving.image((Feed) null).visible(false);
+                f.close();
             }
             textureW = 0;
             textureH = 0;

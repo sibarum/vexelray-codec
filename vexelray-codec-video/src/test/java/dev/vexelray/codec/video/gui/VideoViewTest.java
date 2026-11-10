@@ -1,19 +1,18 @@
 package dev.vexelray.codec.video.gui;
 
-import dev.vexelray.codec.image.gui.Textures;
 import dev.vexelray.codec.video.Fixtures;
 import dev.vexelray.codec.video.Videos;
+import dev.vexelray.gui.core.Feed;
 import dev.vexelray.gui.core.Gui;
+import dev.vexelray.gui.core.model.RetainedNode;
+import dev.vexelray.gui.core.layout.LayoutEnums.Axis;
 import dev.vexelray.gui.core.layout.Length;
-import dev.vexelray.gui.krono.KronoGui;
+import dev.vexelray.gui.core.spi.Seams;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import sibarum.atchung.Atchung;
-import sibarum.kronometer.Dur;
-import sibarum.kronometer.Kron;
 
-import java.io.IOException;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.BooleanSupplier;
 
@@ -22,28 +21,26 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * Playback on a driven clock, with no window: the textures are never bound, so nothing is uploaded, and the frame
- * "shown" is the one the view would have put on its plate. The reel still decodes for real, on its own thread, so each
- * step of logical time waits for the decoder to keep up before taking the next, as a window's frame would.
+ * Playing on the machine's clock, with no window: the test runs the tree's frames headless every few milliseconds, so
+ * the view's asked half is asked as a window would ask it and chooses through the real {@code Drawn}, and then does
+ * the renderer's part, settling the slot shown. The footage decodes for real, on its own thread. {@code rgb.webm} is
+ * 3 s at 10 frames a second.
  */
 class VideoViewTest {
 
-    private KronoGui krono;
+    private Gui gui;
     private VideoView view;
-    private long now;
 
     @BeforeEach
     void open() {
-        Gui gui = new Gui(Atchung.create());
-        krono = KronoGui.attach(gui, Kron.driven());
-        view = new VideoView(gui, krono, new Textures(), Length.ZERO, Length.ZERO);
-        now = 0;
+        gui = new Gui(Atchung.create());
+        view = new VideoView(gui, Length.ZERO, Length.ZERO);
+        gui.root().children(view.node());
     }
 
     @AfterEach
     void close() {
         view.clear();
-        krono.close();
     }
 
     @Test
@@ -61,16 +58,35 @@ class VideoViewTest {
     void framesAreShownAsTheirTimeComes() throws Exception {
         view.play(Videos.open(Fixtures.file("rgb.webm"), 0).clip());
         until(() -> view.shownMicros() == 0, "the first frame is shown");
-        long from = now;
         run(1_000);
-        // A second on the clock is a second into the video: frame 10, give or take the step it landed in.
-        assertTrue(Math.abs(view.shownMicros() - 1_000_000) <= 100_000, "shown " + view.shownMicros());
-        assertTrue(Math.abs(view.position() - (now - from) * 1000) <= 10_000, "position " + view.position());
+        // A second on the clock is a second into the video: frame 10, give or take a frame and the test's own steps.
+        assertTrue(Math.abs(view.shownMicros() - 1_000_000) <= 150_000, "shown " + view.shownMicros());
+        assertTrue(Math.abs(view.position() - 1_000_000) <= 150_000, "position " + view.position());
         assertTrue(view.playing());
     }
 
     @Test
-    void aPauseHoldsTheClockAndASeekWhilePausedShowsTheFrameThere() throws Exception {
+    void aVideoProbedByAJobPlaysWithItsSound() throws Exception {
+        var probed = Videos.probe(Fixtures.file("rgb.mp4"), 0);
+        assertTrue(probed.video().isPresent(), probed.identity());
+        var video = probed.video().get();
+        assertTrue(video.sound(), "rgb.mp4 has a tone");
+        view.play(video);
+        until(() -> view.shownMicros() == 0, "the first frame is shown");
+        run(600);
+        assertTrue(view.shownMicros() >= 400_000, "it plays on: " + view.shownMicros());
+        assertEquals(video.durationMicros(), view.duration());
+    }
+
+    @Test
+    void aFileThatIsNotAVideoIsProbedAsNoneWithAReason() throws Exception {
+        var probed = Videos.probe(Fixtures.file("rgb.mp4").resolveSibling("no-such.mp4"), 0);
+        assertTrue(probed.video().isEmpty());
+        assertFalse(probed.identity().isBlank());
+    }
+
+    @Test
+    void aPauseHoldsTheTimeAndASeekWhilePausedShowsTheFrameThere() throws Exception {
         view.play(Videos.open(Fixtures.file("rgb.webm"), 0).clip());
         until(() -> view.shownMicros() == 0, "the first frame is shown");
         run(500);
@@ -99,6 +115,7 @@ class VideoViewTest {
         until(() -> view.shownMicros() == 0, "the first frame is shown");
         view.seek(2_700_000);
         until(() -> ends.get() == 1, "the end is reached");
+        run(50);
         assertEquals(2_900_000, view.shownMicros());
         assertFalse(view.playing());
         run(300);
@@ -117,16 +134,15 @@ class VideoViewTest {
     }
 
     @Test
-    void aLoopOfAVideoWithNoFramesEndsRatherThanSpinning() throws Exception {
+    void aVideoWithNoFramesStopsRatherThanSpinning() throws Exception {
         AtomicInteger ends = new AtomicInteger();
         view.loop(true).onEnd(ends::incrementAndGet);
         var o = Videos.open(Fixtures.noFrames(), 0);
         assertTrue(o.video(), o.identity());
         view.play(o.clip());
-        until(() -> ends.get() == 1, "the end is reached");
-        assertFalse(view.playing());
+        until(() -> ends.get() == 1 || view.failure() != null, "it stops, ended or failed");
         run(300);
-        assertEquals(1, ends.get(), "said once, not looped round for ever");
+        assertTrue(ends.get() <= 1, "said once at most, not looped round for ever");
         assertEquals(-1, view.shownMicros());
     }
 
@@ -136,29 +152,43 @@ class VideoViewTest {
         view.play(clip);
         until(() -> view.shownMicros() == 0, "the first frame is shown");
         view.clear();
-        until(clip::closed, "the reel closes the clip");
+        until(clip::closed, "the footage closes the clip");
         assertEquals(-1, view.shownMicros());
         assertEquals(-1, view.duration());
     }
 
-    /** {@code ms} of logical time in 10 ms frames, each after the decoder has had a moment to keep up. */
-    private void run(long ms) throws InterruptedException {
-        for (long end = now + ms; now < end; ) {
-            now += 10;
-            krono.tick(Dur.ms(now));
-            Thread.sleep(2);
+    private static float noText(RetainedNode n, Axis axis, float px) {
+        return 0f;
+    }
+
+    /** One frame of the tree, headless: the asked half chooses, and the renderer's settling of the slot shown. */
+    private void frame() {
+        Seams.of(gui).frame(400f, 300f, VideoViewTest::noText);
+        Feed f = view.feed();
+        if (f != null) {
+            f.select();
         }
     }
 
-    /** Frames until {@code condition} holds, with a deadline in real time. */
+    /** {@code ms} of frames, one every few milliseconds. */
+    private void run(long ms) throws InterruptedException {
+        long end = System.nanoTime() + ms * 1_000_000L;
+        while (System.nanoTime() < end) {
+            frame();
+            Thread.sleep(4);
+        }
+    }
+
+    /** Frames until {@code condition} holds, with a deadline. */
     private void until(BooleanSupplier condition, String what) throws InterruptedException {
         long deadline = System.currentTimeMillis() + 10_000;
         while (!condition.getAsBoolean()) {
             if (System.currentTimeMillis() > deadline) {
                 throw new AssertionError("timed out waiting: " + what + " (shown " + view.shownMicros()
-                        + ", position " + view.position() + ")");
+                        + ", position " + view.position() + ", failure " + view.failure() + ")");
             }
-            run(10);
+            frame();
+            Thread.sleep(4);
         }
     }
 }

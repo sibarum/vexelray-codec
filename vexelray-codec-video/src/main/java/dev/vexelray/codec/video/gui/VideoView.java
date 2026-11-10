@@ -1,29 +1,26 @@
 package dev.vexelray.codec.video.gui;
 
-import dev.vexelray.codec.image.Picture;
-import dev.vexelray.codec.image.gui.Textures;
+import dev.vexelray.codec.image.Motion;
+import dev.vexelray.codec.image.gui.Player;
 import dev.vexelray.codec.video.Clip;
-import dev.vexelray.codec.video.Reel;
+import dev.vexelray.codec.video.Footage;
+import dev.vexelray.codec.video.VideoFile;
+import sibarum.ffmpeg.VideoInfo;
+import dev.vexelray.gui.core.Drawn;
+import dev.vexelray.gui.core.Feed;
+import dev.vexelray.gui.core.Frame;
 import dev.vexelray.gui.core.Gui;
 import dev.vexelray.gui.core.Node;
 import dev.vexelray.gui.core.layout.Length;
 import dev.vexelray.gui.core.layout.NodeLayout;
 import dev.vexelray.gui.core.spi.Seams;
-import dev.vexelray.gui.krono.KronoGui;
-import dev.vexelray.gui.krono.Scheduled;
-import dev.vexelray.vulkan.present.SampledImage;
-import sibarum.ffmpeg.Frame;
-import sibarum.kronometer.Dur;
-import sibarum.kronometer.Time;
-
-import java.util.concurrent.atomic.AtomicInteger;
 
 /**
  * A place to play one {@link Clip}: whole, at its own aspect, as large as its stage allows. Its {@link #node} goes in a
  * tree like any other, and fills what it is given.
  *
  * {@snippet :
- * VideoView view = new VideoView(gui, krono, textures, Length.ZERO, Length.ZERO);
+ * VideoView view = new VideoView(gui, Length.ZERO, Length.ZERO);
  * // Opening blocks, so it is a @Job: Videos.open(path, 1920), its Opened in the reply.
  * // The view that hears the reply:
  * if (opened.video()) {
@@ -31,60 +28,50 @@ import java.util.concurrent.atomic.AtomicInteger;
  * }
  * }
  *
- * <p><b>Paced by krono, decoded by a {@link Reel}.</b> A shred on the timeline keeps the clip's clock: it advances to
- * each frame's time and asks the reel for the frame due then, so a video runs on the same clock as every animation in
- * the window, and a frame the decoder was too late with is dropped rather than shown late. Until the first frame after
- * a start or a seek has come, the clock waits for it, so a slow open does not skip the opening.
- *
- * <p><b>A texture per frame.</b> A texture is never rewritten ({@code GuiApp.texture}), so each frame due is uploaded
- * as one ({@code Textures.upload}), the plate is pointed at it, and the one before is given back
- * ({@code Textures.release}), which closes it once no frame in flight samples it. One upload is in flight at a time: a
- * frame that falls due while one is still on its way waits, and is replaced by any later one, so a window that draws
- * slower than the video plays shows fewer frames rather than falling behind.
+ * <p><b>On the frame contract</b> (vexelray-gui's frame-contract.md, step 5). The clip's frames are made by a
+ * {@link Footage}, a few ahead on its own thread, and written by a {@link Player} into a feed of three slots, each
+ * stamped with its time; the plate shows the feed, and this widget's asked half ({@link #draw}, registered through
+ * {@link Seams#ask}, the widget library's seam) shows the frame due at each frame's moment. Nothing paces the video on
+ * the GUI thread but that choice, and nothing is uploaded but the slot shown. A frame the decoder was too late with is
+ * dropped for the one due, so a slow machine shows fewer frames rather than falling behind. A {@link VideoFile} plays with
+ * its sound on the speakers, the frames following what is heard; a {@link Clip} handed in plays its pictures only.
  *
  * <p><b>Sized in percent of a stage</b>, as {@code ImageView} is, and for the same reason. Unlike a picture, a video
  * is enlarged to fill its stage: a video is watched at the size of the window, whatever size it was made at.
  *
- * <p><b>Letting go.</b> {@link #clear} stops the clock, closes the reel and the clip, and gives the texture back.
+ * <p><b>Letting go.</b> {@link #clear} stops the player, which closes the footage and the clip, and closes the feed.
  */
 public final class VideoView {
 
-    /** The longest the clock waits between looks at the reel, when no frame is waiting to say how long. */
-    static final long WAIT_US = 5_000;
-    /** The longest step to a waiting frame: a still held for minutes is still watched for a seek or a pause. */
-    static final long MAX_STEP_US = 100_000;
+    /** How soon the asked half looks again while the first frame after a start is still being made: about a frame. */
+    static final long FIRST_FRAME_LOOK_NANOS = 16_000_000L;
 
-    private final Gui gui;
-    private final KronoGui krono;
-    private final Textures textures;
     private final Node well;
     private final Node stage;
     private final Node plate;
 
-    /** Bumped by every play, pause, resume, seek and clear, so a stale clock stops and a stale texture goes back. */
-    private final AtomicInteger generation = new AtomicInteger();
     private volatile NodeLayout stageBox = NodeLayout.ABSENT;
+    /** The feed the plate shows, read by the asked half with no lock; null when nothing plays. */
+    private volatile Feed playing;
+    /** The stamp of the frame the asked half last showed, or -1 before it has shown one. */
+    private volatile long drawnStamp = -1;
+    /** How many distinct frames the asked half has shown, ever: written on the GUI thread only. */
+    private volatile long shownCount;
 
     // Guarded by this.
-    private Reel reel;
-    private Scheduled clock;
-    private boolean playing;
+    private Clip clip;
+    /** The video's own size, which the plate is fitted at, and its length; 0 and -1 with nothing playing. */
+    private int width;
+    private int height;
+    private long lengthMicros = -1;
+    private Player player;
     private boolean loop;
     private Runnable onEnd = () -> { };
-    /** The texture on the plate, and the time of the frame it holds; -1 for none. */
-    private SampledImage shown;
-    private long shownMicros = -1;
-    /** The generation with an upload on its way, or -1; and the frame due after it, if one has fallen due since. */
-    private int inFlight = -1;
-    private Frame pending;
+    /** Whether the end has been said for the player playing now. */
+    private boolean endSaid;
+    private String failure;
 
-    /** Where the clock has got to, in the clip's time: written by the clock's shred, read by anyone. */
-    private volatile long position;
-
-    public VideoView(Gui gui, KronoGui krono, Textures textures, Length padY, Length padX) {
-        this.gui = gui;
-        this.krono = krono;
-        this.textures = textures;
+    public VideoView(Gui gui, Length padY, Length padX) {
         this.plate = gui.box().size(Length.ZERO, Length.ZERO).floatAt(Length.ZERO, Length.ZERO).hitInert(true)
                 .visible(false);
         this.stage = gui.column().width(Length.FILL).height(Length.FILL).clip(true).scroll(false, false)
@@ -95,6 +82,7 @@ public final class VideoView {
             stageBox = box;
             fit();
         });
+        Seams.of(gui).ask(this::draw);
     }
 
     public Node node() {
@@ -104,16 +92,33 @@ public final class VideoView {
     /**
      * Play {@code clip} from its start; or, with {@code start} false, show its first frame and wait for
      * {@link #resume}. The view owns the clip from here, and closes it when it plays another or is {@linkplain #clear
-     * cleared}.
+     * cleared}. A clip that does not say how long it is or how fast it plays is not played: {@link #failure} says so.
      */
     public synchronized void play(Clip clip, boolean start) {
         stop();
-        reel = new Reel(clip);
-        position = 0;
-        playing = start;
-        plate.visible(true);
+        VideoInfo info = clip.info();
+        if (!Footage.plays(info)) {
+            clip.close();
+            failure = "a video with no length or rate";
+            return;
+        }
+        this.clip = clip;
+        width = clip.info().width();
+        height = clip.info().height();
+        lengthMicros = info.durationMicros();
+        Motion motion = new Motion(clip.stamp(), Footage.count(info), Math.max(1, info.durationMicros() / 1000), 0,
+                (m, side) -> new Footage(clip), true);
+        Feed feed = Player.feed(clip.width(), clip.height());
+        Player p = Player.play(feed, motion, this::changed);
+        p.loop(loop);
+        if (!start) {
+            p.pause();
+        }
+        player = p;
+        endSaid = false;
+        playing = feed;
+        plate.image(feed).visible(true);
         fit();
-        run(0, !start);
     }
 
     /** {@link #play(Clip, boolean) Play} {@code clip} from its start, now. */
@@ -121,263 +126,187 @@ public final class VideoView {
         play(clip, true);
     }
 
-    /** Hold the frame showing, and the clock with it. */
-    public synchronized void pause() {
-        if (!playing) {
-            return;
+    /**
+     * Play {@code video} from its start, with its sound on the speakers when it has one; or, with {@code start} false,
+     * show its first frame and wait for {@link #resume}. What an application on 0.2 plays from: a job answers with the
+     * video as values ({@link dev.vexelray.codec.video.Videos#probe}), and the player opens the file again on its own
+     * thread, so nothing open crosses the bus.
+     */
+    public synchronized void play(VideoFile video, boolean start) {
+        stop();
+        width = video.width();
+        height = video.height();
+        lengthMicros = video.durationMicros();
+        Feed feed = Player.feed(video.width(), video.height());
+        Player p = Player.play(feed, video.motion(), this::changed);
+        p.loop(loop);
+        if (!start) {
+            p.pause();
         }
-        playing = false;
-        generation.incrementAndGet();
-        cancelClock();
+        player = p;
+        endSaid = false;
+        playing = feed;
+        plate.image(feed).visible(true);
+        fit();
     }
 
-    /** Play on from where the clock was held; from the start, if it had reached the end. */
+    /** {@link #play(VideoFile, boolean) Play} {@code video} from its start, now. */
+    public void play(VideoFile video) {
+        play(video, true);
+    }
+
+    /** Hold the frame showing, and the time with it. */
+    public synchronized void pause() {
+        if (player != null) {
+            player.pause();
+        }
+    }
+
+    /** Play on from where it was held; from the start, if it had reached the end. */
     public synchronized void resume() {
-        if (playing || reel == null) {
-            return;
+        if (player != null) {
+            endSaid = false;
+            player.play();
         }
-        playing = true;
-        if (reel.finished()) {
-            reel.seek(0);
-            position = 0;
-        }
-        run(position, false);
     }
 
     /**
      * Go to {@code micros} into the clip, exactly (the frames from the keyframe before it are decoded and dropped). If
-     * the view is paused, the frame there is shown and the clock stays held there.
+     * the view is paused, the frame there is shown and it stays held there.
      */
     public synchronized void seek(long micros) {
-        if (reel == null) {
-            return;
+        if (player != null) {
+            endSaid = false;
+            player.seek(Math.max(0, micros) / 1000);
         }
-        long to = Math.max(0, micros);
-        reel.seek(to);
-        position = to;
-        run(to, !playing);
     }
 
     /** Start again from the beginning whenever the end is reached. */
     public synchronized VideoView loop(boolean loop) {
         this.loop = loop;
+        if (player != null) {
+            player.loop(loop);
+        }
         return this;
     }
 
-    /** Run {@code r} on the timeline when a clip that does not loop reaches its end, and is held there. */
+    /** Run {@code r}, on the player's thread, when a clip that does not loop reaches its end and is held there. */
     public synchronized VideoView onEnd(Runnable r) {
         onEnd = r == null ? () -> { } : r;
         return this;
     }
 
-    /** Show nothing: stop the clock, close the reel and the clip, and give the texture back. */
+    /** Show nothing: stop the player, close the footage, the clip and the feed. */
     public synchronized void clear() {
         stop();
-        plate.visible(false);
+        failure = null;
     }
 
     public synchronized boolean playing() {
-        return playing;
+        return player != null && player.wanted();
     }
 
     /** The clip playing or held, or null. */
     public synchronized Clip clip() {
-        return reel == null ? null : reel.clip();
+        return clip;
     }
 
-    /** How far into the clip the clock is, in µs. */
-    public long position() {
-        return position;
+    /** How far into the clip the time is, in µs. */
+    public synchronized long position() {
+        return player == null ? 0 : player.position() * 1000;
     }
 
-    /** The clip's length in µs, or -1 where the file does not say or nothing is playing. */
+    /** The clip's length in µs, or -1 where nothing is playing. */
     public synchronized long duration() {
-        return reel == null ? -1 : reel.clip().info().durationMicros();
+        return player == null ? -1 : lengthMicros;
     }
 
-    /** Why the clip stopped decoding early, or null if it has not, or nothing is playing. */
+    /** Why the clip will not play or stopped decoding early, or null. */
     public synchronized String failure() {
-        return reel == null ? null : reel.failure();
+        if (failure != null) {
+            return failure;
+        }
+        return player == null ? null : player.failure();
     }
 
-    /** The time in the clip of the frame on the plate, or -1 before the first has been shown. */
+    /**
+     * How many distinct frames have been shown since the view was made, counted at the frames a window drew, so its
+     * rate is the frame rate a person watching sees: a meter's.
+     */
+    public long framesShown() {
+        return shownCount;
+    }
+
+    /** The feed the plate shows, or null: for a test, which does a renderer's part. */
+    Feed feed() {
+        return playing;
+    }
+
+    /** The time in the clip of the frame on the plate, in µs, or -1 before the first has been shown. */
     public synchronized long shownMicros() {
-        return shownMicros;
+        long ms = player == null ? -1 : player.millisOf(drawnStamp);
+        return ms < 0 ? -1 : ms * 1000;
     }
 
     /**
-     * Start the clock at {@code from}, as a new generation: it shows each frame as its time comes, or with {@code once}
-     * shows the first frame to come and stops, which is how a paused view shows where it was sought to.
+     * The asked half: the frame of the clip due at the frame's moment, and when the next one is. Before the first frame
+     * the plate is drawn at nothing, since an empty feed draws a placeholder. Reads only the volatile feed; GUI thread.
      */
-    private void run(long from, boolean once) {
-        int g = generation.incrementAndGet();
-        cancelClock();
-        Reel r = reel;
-        clock = krono.spork("video", () -> {
-            long now = from;
-            boolean primed = false;
-            boolean looped = false;
-            while (generation.get() == g) {
-                Frame f = r.due(now);
-                if (f != null) {
-                    primed = true;
-                    present(g, f);
-                    if (once) {
-                        return;
-                    }
-                }
-                if (r.finished()) {
-                    // A pass from the start that showed nothing (a file that fails at once, or has no frames) is not
-                    // looped again: it would fail again every few milliseconds, for ever.
-                    if (once || !ended(g, r, !(looped && !primed))) {
-                        return;
-                    }
-                    now = 0;
-                    primed = false;
-                    looped = true;
-                }
-                long next = r.next();
-                long step = next > now ? Math.min(next - now, MAX_STEP_US) : WAIT_US;
-                Time.advance(Dur.us(step));
-                if (generation.get() != g) {
-                    return;
-                }
-                // Before the first frame has come the clock waits for it; after, it keeps time, and frames that come
-                // too late for it are dropped by the reel.
-                if (primed || next >= 0) {
-                    now += step;
-                    if (!once) {
-                        position = now;
-                    }
-                }
-            }
-        });
+    long draw(Frame frame, Drawn out) {
+        Feed f = playing;
+        if (f == null) {
+            return Frame.NEVER;
+        }
+        int slot = f.due(frame);
+        if (slot < 0) {
+            out.opacity(plate, 0f);
+            return frame.presentNanos() + FIRST_FRAME_LOOK_NANOS;
+        }
+        out.show(f, slot);
+        out.opacity(plate, 1f);
+        long stamp = f.stamp(slot);
+        if (stamp != drawnStamp) {
+            shownCount++;
+        }
+        drawnStamp = stamp;
+        return f.next(frame);
     }
 
-    /**
-     * The reel has run out: from the start again if looping and {@code again} (true), else held at the end, and said
-     * so (false).
-     */
-    private boolean ended(int g, Reel r, boolean again) {
-        Runnable then;
+    /** What the player says has changed: the end, said once, for a clip that does not loop. The player's thread. */
+    private void changed() {
+        Runnable then = null;
         synchronized (this) {
-            if (generation.get() != g) {
-                return false;
+            Player p = player;
+            if (p != null && p.ended() && !endSaid) {
+                endSaid = true;
+                then = onEnd;
             }
-            if (loop && again) {
-                r.seek(0);
-                position = 0;
-                return true;
-            }
-            playing = false;
-            then = onEnd;
         }
-        then.run();
-        return false;
-    }
-
-    /** Put {@code f} on the plate: upload it, unless one is on its way, in which case it waits its turn. */
-    private void present(int g, Frame f) {
-        synchronized (this) {
-            if (inFlight == g) {
-                pending = f;
-                return;
-            }
-            inFlight = g;
-            pending = null;
-        }
-        upload(g, f);
-    }
-
-    private void upload(int g, Frame f) {
-        Clip c = clip();
-        if (c == null) {
-            return;
-        }
-        Picture picture = new Picture(f, f.rgba(), f.width(), f.height(), 1, 1, new int[1], c.info().width(),
-                c.info().height(), false);
-        boolean sent = textures.upload(picture, texture -> {
-            Frame next;
-            synchronized (this) {
-                if (generation.get() != g) {
-                    textures.release(texture);
-                    if (inFlight == g) {
-                        inFlight = -1;
-                    }
-                    return;
-                }
-                plate.image(texture);
-                SampledImage old = shown;
-                shown = texture;
-                shownMicros = f.ptsMicros();
-                if (old != null) {
-                    textures.release(old);
-                }
-                next = pending;
-                pending = null;
-                if (next == null) {
-                    inFlight = -1;
-                    return;
-                }
-            }
-            upload(g, next);
-        }, () -> {
-            // The device would not make this frame's texture: the frame is skipped, and the next one due is tried
-            // rather than the picture freezing with an upload "on its way" that never lands.
-            Frame next;
-            synchronized (this) {
-                next = generation.get() == g ? pending : null;
-                pending = null;
-                if (next == null) {
-                    if (inFlight == g) {
-                        inFlight = -1;
-                    }
-                    return;
-                }
-            }
-            upload(g, next);
-        });
-        if (!sent) {
-            // No window (a headless run): nothing to upload into, but the frame was due, and is the one "shown".
-            synchronized (this) {
-                shownMicros = f.ptsMicros();
-                inFlight = -1;
-                pending = null;
-            }
+        if (then != null) {
+            then.run();
         }
     }
 
-    /** Stop the clock, close the reel, and give back the texture. */
+    /** Stop the player and close the feed. Under this. */
     private void stop() {
-        generation.incrementAndGet();
-        cancelClock();
-        if (reel != null) {
-            reel.close();
-            reel = null;
+        if (player != null) {
+            player.close();
+            player = null;
         }
-        playing = false;
-        plate.image((SampledImage) null);
-        if (shown != null) {
-            textures.release(shown);
-            shown = null;
+        Feed f = playing;
+        playing = null;
+        drawnStamp = -1;
+        plate.image((Feed) null).visible(false);
+        if (f != null) {
+            f.close();
         }
-        shownMicros = -1;
-        inFlight = -1;
-        pending = null;
-        position = 0;
-    }
-
-    private void cancelClock() {
-        if (clock != null) {
-            clock.cancel();
-            clock = null;
-        }
+        clip = null;
     }
 
     /** Size and place the plate on the stage: whole, at the clip's aspect, centred, as large as the stage allows. */
     private synchronized void fit() {
         NodeLayout box = stageBox;
-        if (reel == null || !box.present()) {
+        if (player == null || !box.present()) {
             return;
         }
         float cw = box.content().w();
@@ -385,7 +314,7 @@ public final class VideoView {
         if (cw <= 0f || ch <= 0f) {
             return;
         }
-        float[] f = fraction(reel.clip().info().width(), reel.clip().info().height(), cw, ch);
+        float[] f = fraction(width, height, cw, ch);
         plate.size(Length.percent(100f * f[0]), Length.percent(100f * f[1]))
                 .floatAt(Length.percent(50f * (1f - f[0])), Length.percent(50f * (1f - f[1])));
     }
