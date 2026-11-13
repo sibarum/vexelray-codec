@@ -4,13 +4,12 @@ import dev.vexelray.codec.image.Glimpses;
 import dev.vexelray.codec.image.Motion;
 import dev.vexelray.codec.image.Playable;
 import dev.vexelray.codec.image.Reasons;
-import dev.vexelray.vulkan.present.MipChain;
-import sibarum.ffmpeg.Frame;
 import sibarum.ffmpeg.Video;
 import sibarum.ffmpeg.VideoInfo;
 import sibarum.probe.Log;
 
 import java.io.IOException;
+import java.util.ArrayDeque;
 import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.Map;
@@ -28,9 +27,14 @@ import java.util.Map;
  * <p><b>Forward by decoding, anywhere else by seeking.</b> The thread decodes the wanted frame and the {@link #AHEAD}
  * after it, then sleeps until the wanted frame moves. A frame a little ahead of the decoder is decoded up to; one
  * behind it, or further ahead than {@link #RUN_SECONDS}, is sought ({@code Video.seek} is exact); and so is one ahead by
- * more frames than seeking has lately cost, since a seek passes frames without scaling them ({@link #skips}). The
- * wanted frame is kept the moment it is decoded, even if the window has moved past it by then: a decoder slower than
- * the rate makes every frame a little late, and the player shows the newest made, late, rather than none.
+ * more frames than seeking has lately cost ({@link #skips}). The wanted frame is kept the moment it is decoded, even if
+ * the window has moved past it by then: a decoder slower than the rate makes every frame a little late, and the player
+ * shows the newest made, late, rather than none.
+ *
+ * <p><b>Decoded, and converted only to be shown.</b> Every frame is decoded ({@code Video.decode}), and only one the
+ * window wants is converted: scaled to RGBA in one threaded pass straight into a chain's first level
+ * ({@code Video.convert}), then given its mips ({@link OpaqueMips}). A frame passed on the way costs its decoding
+ * alone. Chains let go of are written again rather than made anew.
  *
  * <p><b>Kept, within a budget</b>, as a {@code Movie} keeps its frames: the least recently shown go first past
  * {@link #BUDGET}, so stepping back a few frames, or round a short loop, costs no decode.
@@ -52,6 +56,9 @@ public final class Footage implements Playable {
 
     /** How far ahead of the decoder a frame is decoded up to rather than sought. */
     static final double RUN_SECONDS = 2;
+
+    /** How many chains let go of are kept to be written again. */
+    private static final int SPARE = 4;
 
     /**
      * What a video's poster carries as its motion: one instance, so two posters of a file are equal. It plays the file
@@ -97,11 +104,21 @@ public final class Footage implements Playable {
     private String failure;
     private boolean closed;
 
+    /** Chains let go of, to be written again rather than made: at most {@link #SPARE}. */
+    private final ArrayDeque<byte[][]> spare = new ArrayDeque<>();
+    /** The chain {@link #frame} last gave out, which the player may be copying: never written again until another is. */
+    private byte[][] lent;
+
     // The decoder's, on its own thread only.
-    /** The last frame decoded, whose span is not known until the next one comes; its number, or -1 for none. */
-    private Frame held;
+    /**
+     * Whether a frame has been decoded since the last seek: the last one, whose span is not known until the next one
+     * comes. Its number, or -1 for none; its chain if it was converted (only a frame that may be shown is), else null;
+     * and whether the video still holds it decoded, so it can still be converted.
+     */
+    private boolean held;
     private int heldAt = -1;
     private byte[][] heldChain;
+    private boolean heldLive;
     /** {@link #held} is kept already, as the frame asked for, before its span was known. */
     private boolean heldKept;
     /** The stream has ended after {@link #held}. */
@@ -250,7 +267,11 @@ public final class Footage implements Playable {
     @Override
     public byte[][] frame(int i) {
         synchronized (lock) {
-            return kept.get(i);
+            byte[][] chain = kept.get(i);
+            if (chain != null) {
+                lent = chain;
+            }
+            return chain;
         }
     }
 
@@ -273,6 +294,7 @@ public final class Footage implements Playable {
         synchronized (lock) {
             closed = true;
             kept.clear();
+            spare.clear();
             keptBytes = 0;
             lock.notifyAll();
         }
@@ -350,6 +372,12 @@ public final class Footage implements Playable {
     /**
      * Make frame {@code target}: decode up to it, seeking first if it is behind the decoder or far ahead, and keep
      * every frame passed that the window wants. Returns once it is made, or no longer wanted.
+     *
+     * <p>Every frame is decoded, and only one that may be shown is converted (scaled to RGBA, given its mips): the
+     * frame asked for, or one the window wants under its own number. A frame passed on the way costs its decoding
+     * alone. The one case that misses is a frame that turns out to stand for later numbers than its own (a stream
+     * whose frames are not evenly spaced) when one of those is wanted: then nothing is kept for them, they stay
+     * missing, and the decoder seeks back for them, the first frame after a seek being converted.
      */
     private void walkTo(int target) {
         Video video = clip.video();
@@ -359,9 +387,10 @@ public final class Footage implements Playable {
             if (heldAt < 0 || target < heldAt || target > heldAt + run || skips(target)) {
                 soughtAt = System.nanoTime();
                 video.seek(startOf(target) * 1000);
-                held = null;
+                held = false;
                 heldChain = null;
                 heldKept = false;
+                heldLive = false;
                 heldAt = -1;
                 atEnd = false;
                 sought = true;
@@ -369,9 +398,12 @@ public final class Footage implements Playable {
             while (true) {
                 if (atEnd) {
                     // Nothing comes after the last frame: it stands for every number from its own to the end.
-                    if (held == null) {
+                    if (!held) {
                         ended(target, null, null);
                         return;
+                    }
+                    if (heldChain == null && wantedFrom(heldAt)) {
+                        reconvertLast(video);
                     }
                     cover(heldAt, Integer.MAX_VALUE);
                     if (!stillWanted(target)) {
@@ -382,36 +414,42 @@ public final class Footage implements Playable {
                     return;
                 }
                 long t0 = System.nanoTime();
-                Frame f = video.next();
-                if (f == null) {
+                long pts = video.decode();
+                if (pts < 0) {
+                    heldLive = false;
                     atEnd = true;
                     continue;
                 }
-                measure(held == null && sought ? soughtAt : t0, held == null && sought, target);
-                int at = (int) Math.max(0, Math.min(Integer.MAX_VALUE, Math.round(f.ptsMicros() * rate / 1e6)));
-                if (held == null) {
+                measure(!held && sought ? soughtAt : t0, !held && sought, target);
+                int at = (int) Math.max(0, Math.min(Integer.MAX_VALUE, Math.round(pts * rate / 1e6)));
+                if (!held) {
                     // The first frame after a seek stands for the number sought, whatever its own rounds to.
                     at = sought ? Math.min(at, target) : at;
                 } else if (at <= heldAt) {
                     // Two frames on one number: the later one shows, in place of the earlier if that was kept already.
-                    held = f;
                     heldChain = null;
+                    heldLive = true;
                     if (heldKept) {
-                        keepHeld();
+                        keepHeld(video);
+                    } else if (heldAt == target || wantedNow(heldAt)) {
+                        convertHeld(video);
                     }
                     continue;
                 } else {
                     cover(heldAt, at - 1);
                 }
-                held = f;
+                held = true;
                 heldChain = null;
+                heldLive = true;
                 heldAt = at;
                 heldKept = false;
                 if (at == target) {
                     // The frame asked for is kept at once, under its own number, rather than once the next frame says
                     // how long it lasts; and kept even if the window has moved past it meanwhile. A decoder slower than
                     // the rate is always a little late, and a player late for a frame shows it late rather than none.
-                    keepHeld();
+                    keepHeld(video);
+                } else if (wantedNow(at)) {
+                    convertHeld(video);   // covered under its number once the next frame comes
                 }
                 if (!stillWanted(target)) {
                     return;
@@ -432,12 +470,25 @@ public final class Footage implements Playable {
     }
 
     /**
+     * The stream has ended, and its last frame, which stands for every number from its own on, was passed without
+     * being converted: seek back to it and convert it, leaving the decoder at the end again.
+     */
+    private void reconvertLast(Video video) {
+        video.seek(startOf(heldAt) * 1000);
+        if (video.decode() < 0) {
+            return;   // nothing at its own time after all: its numbers stay missing, and the end is said for them
+        }
+        heldLive = true;
+        convertHeld(video);
+        heldLive = false;
+    }
+
+    /**
      * Whether {@code target}, ahead of the decoder, is reached sooner by seeking than by decoding every frame up to it.
-     * Every frame decoded is also scaled and copied out, which costs several times its decoding; a seek decodes from
-     * the keyframe before it and drops what it passes unscaled, at a cost that depends on how far back that keyframe
-     * is. So a decoder behind the window, whose frames up to the one wanted nobody will see, seeks once the frames
-     * between would cost more than seeks have been costing (before one is measured, a quarter of the run's steps).
-     * None between is wanted: the target is the first frame of the window not made yet.
+     * A seek decodes from the keyframe before it, at a cost that depends on how far back that keyframe is; decoding up
+     * to it costs a step a frame. So a decoder behind the window, whose frames up to the one wanted nobody will see,
+     * seeks once the frames between would cost more than seeks have been costing (before one is measured, a quarter of
+     * the run's steps). None between is wanted: the target is the first frame of the window not made yet.
      */
     private boolean skips(int target) {
         long between = target - heldAt - 1L;
@@ -465,8 +516,37 @@ public final class Footage implements Playable {
         }
     }
 
+    /** Whether the window wants frame {@code j} and has not got it. */
+    private boolean wantedNow(int j) {
+        synchronized (lock) {
+            return !closed && j < frames && wanted(j) && !kept.containsKey(j);
+        }
+    }
+
+    /** Whether the window wants any frame from {@code j} on that it has not got. */
+    private boolean wantedFrom(int j) {
+        synchronized (lock) {
+            for (int d = 0; d <= AHEAD; d++) {
+                int k = wanted + d;
+                if (k >= frames) {
+                    if (!wrap || frames == 0) {
+                        break;
+                    }
+                    k %= frames;
+                }
+                if (k >= j && !kept.containsKey(k)) {
+                    return true;
+                }
+            }
+            return false;
+        }
+    }
+
     /** {@link #held} shows for frames {@code from} to {@code to}: keep it as each of them the window wants. */
     private void cover(int from, int to) {
+        if (heldChain == null) {
+            return;   // not converted: not a frame that was to be shown (see walkTo)
+        }
         int last;
         synchronized (lock) {
             last = Math.min(to, frames - 1);
@@ -480,26 +560,43 @@ public final class Footage implements Playable {
                 keep = wanted(j) && !kept.containsKey(j);
             }
             if (keep) {
-                if (heldChain == null) {
-                    heldChain = MipChain.of(held.rgba(), held.width(), held.height());
-                }
                 keep(j, heldChain);
             }
         }
     }
 
-    /** Keep {@link #held} as frame {@link #heldAt}, wanted by the window or not, unless the stream is shorter. */
-    private void keepHeld() {
+    /** Keep the frame held as frame {@link #heldAt}, wanted by the window or not, unless the stream is shorter. */
+    private void keepHeld(Video video) {
         synchronized (lock) {
             if (closed || heldAt >= frames) {
                 return;
             }
         }
-        if (heldChain == null) {
-            heldChain = MipChain.of(held.rgba(), held.width(), held.height());
+        convertHeld(video);
+        if (heldChain != null) {
+            keep(heldAt, heldChain);
+            heldKept = true;
         }
-        keep(heldAt, heldChain);
-        heldKept = true;
+    }
+
+    /**
+     * Convert the frame the video holds into a chain, unless it is already: scaled to RGBA straight into a chain's
+     * first level, in one pass, and given its mips. The chain is a spare one when there is one.
+     */
+    private void convertHeld(Video video) {
+        if (heldChain != null || !heldLive) {
+            return;
+        }
+        byte[][] chain;
+        synchronized (lock) {
+            chain = spare.poll();
+        }
+        if (chain == null) {
+            chain = OpaqueMips.chain(width, height);
+        }
+        video.convert(chain[0]);
+        OpaqueMips.fill(chain, width, height);
+        heldChain = chain;
     }
 
     private void keep(int k, byte[][] chain) {
@@ -522,8 +619,23 @@ public final class Footage implements Playable {
                 }
                 it.remove();
                 keptBytes -= bytes;
+                letGo(e.getValue());
+            }
+            if (old != null && old != chain) {
+                letGo(old);
             }
         }
+    }
+
+    /**
+     * A chain no longer kept under some number: a spare, to be written again, unless it is still kept under another,
+     * is the one the decoder holds, or may be being copied by the player. Under lock.
+     */
+    private void letGo(byte[][] chain) {
+        if (spare.size() >= SPARE || chain == lent || chain == heldChain || kept.containsValue(chain)) {
+            return;
+        }
+        spare.push(chain);
     }
 
     /**
