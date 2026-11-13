@@ -291,6 +291,135 @@ class PlayerTest {
         assertEquals(4, dueAt(f, 35));
     }
 
+    /**
+     * A 60 fps video on a decoder that makes the frame asked for 25 ms after it is asked, one at a time, as
+     * {@code Footage} does at 1080p60 with its mip chains: every frame it is asked for when due is made late. It used to
+     * make every one and have each thrown away, showing the first frame and never another; now the newest made is
+     * shown, late, and once none is, a frame far enough ahead is asked for that it is made in time.
+     */
+    @Test
+    void aVideoWhoseDecoderIsAlwaysLateStillShowsNewFrames() {
+        int lagMs = 25;
+        Strip s = new Strip(600, 16, true) {
+            int asked = -1;
+            long askedAt;
+
+            void decode() {
+                if (asked >= 0 && now - askedAt >= lagMs * MS) {
+                    ready.set(asked);
+                }
+            }
+
+            @Override
+            public void want(int i, boolean wrap) {
+                decode();
+                if (i != asked && (asked < 0 || ready.get(asked))) {
+                    asked = i;   // busy with one frame, it takes the next ask once that one is made
+                    askedAt = now;
+                }
+            }
+
+            @Override
+            public byte[][] frame(int i) {
+                decode();
+                return super.frame(i);
+            }
+        };
+        s.ready.clear(1, s.count);
+        Player p = player(s);
+        Feed f = p.feed();
+        java.util.List<Integer> shown = new java.util.ArrayList<>();
+        for (now = 0; now <= 1000 * MS; now += MS) {
+            for (int k = 0; k < 8 && p.once() == 0; k++) {
+                // made and handed over: look again at once, as the thread does
+            }
+            int newest = f.newest();
+            if (newest >= 0 && f.stamp(newest) <= now) {
+                draw(f);   // as a window whose asked half chooses the frame due: never one handed over ahead of its time
+            }
+            int d = dueNow(f);
+            if (shown.isEmpty() || shown.get(shown.size() - 1) != d) {
+                shown.add(d);
+            }
+        }
+        assertTrue(shown.size() >= 20, "a second of a decoder a frame and a half behind shows frames: " + shown);
+        for (int k = 1; k < shown.size(); k++) {
+            assertTrue(shown.get(k) > shown.get(k - 1), "and only ever newer ones: " + shown);
+        }
+        assertTrue(shown.get(shown.size() - 1) >= 55, "and keeps up with the time: " + shown);
+    }
+
+    /**
+     * A 60 fps video on a decoder that walks forward as {@code Footage} does: 12 ms a frame decoded, 8 ms more for each
+     * frame of the window it keeps (the frame asked for and the four after), seeking only to go back. It keeps up while
+     * it passes frames and falls behind while it keeps them. The pictures run in bursts, each a little late, with a jump
+     * ahead between, and never stop for long.
+     */
+    @Test
+    void aVideoOnADecoderThatWalksForwardNeverStopsShowingFrames() {
+        Strip s = new Strip(1200, 16, true) {
+            int window = 0;
+            int at = 0;
+            long busyUntil = 0;
+
+            void decode() {
+                while (busyUntil <= now) {
+                    if (window < at) {
+                        at = window;   // behind the decoder: sought, the frame there decoded next
+                    } else {
+                        at++;
+                    }
+                    if (at >= window && at <= window + 4 && at < count && !ready.get(at)) {
+                        ready.set(at);
+                        busyUntil += 20 * MS;
+                    } else {
+                        busyUntil += 12 * MS;
+                    }
+                }
+            }
+
+            @Override
+            public void want(int i, boolean wrap) {
+                decode();
+                window = i;
+            }
+
+            @Override
+            public byte[][] frame(int i) {
+                decode();
+                return super.frame(i);
+            }
+        };
+        s.ready.clear(1, s.count);
+        Player p = player(s);
+        Feed f = p.feed();
+        int last = 1;
+        long lastNew = 0;
+        long longest = 0;
+        int distinct = 0;
+        for (now = 0; now <= 3000 * MS; now += MS) {
+            for (int k = 0; k < 8 && p.once() == 0; k++) {
+                // made and handed over: look again at once, as the thread does
+            }
+            int newest = f.newest();
+            if (newest >= 0 && f.stamp(newest) <= now) {
+                draw(f);
+            }
+            int slot = f.due(new Frame(now, now, false));
+            int d = slot < 0 ? -1 : (int) (f.stamp(slot) / (16 * MS)) + 1;   // by its stamp: a byte holds too few
+            assertTrue(d >= last, "only ever newer frames: " + d + " after " + last);
+            if (d != last) {
+                longest = Math.max(longest, now - lastNew);
+                lastNew = now;
+                last = d;
+                distinct++;
+            }
+        }
+        assertTrue(distinct >= 60, "three seconds of a decoder slower than the rate show frames: " + distinct);
+        assertTrue(longest <= 250 * MS, "and never stop for long: " + longest / MS + " ms without a new one");
+        assertTrue(last >= 150, "and keep up with the time: at frame " + (last - 1) + " after 3 s");
+    }
+
     @Test
     void notLoopingItStopsAtTheEndOnTheLastFrame() {
         Strip s = new Strip(3, 10, false);

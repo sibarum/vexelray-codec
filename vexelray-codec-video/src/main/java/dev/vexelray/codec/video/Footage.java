@@ -27,7 +27,10 @@ import java.util.Map;
  *
  * <p><b>Forward by decoding, anywhere else by seeking.</b> The thread decodes the wanted frame and the {@link #AHEAD}
  * after it, then sleeps until the wanted frame moves. A frame a little ahead of the decoder is decoded up to; one
- * behind it, or further ahead than {@link #RUN_SECONDS}, is sought ({@code Video.seek} is exact).
+ * behind it, or further ahead than {@link #RUN_SECONDS}, is sought ({@code Video.seek} is exact); and so is one ahead by
+ * more frames than seeking has lately cost, since a seek passes frames without scaling them ({@link #skips}). The
+ * wanted frame is kept the moment it is decoded, even if the window has moved past it by then: a decoder slower than
+ * the rate makes every frame a little late, and the player shows the newest made, late, rather than none.
  *
  * <p><b>Kept, within a budget</b>, as a {@code Movie} keeps its frames: the least recently shown go first past
  * {@link #BUDGET}, so stepping back a few frames, or round a short loop, costs no decode.
@@ -99,8 +102,16 @@ public final class Footage implements Playable {
     private Frame held;
     private int heldAt = -1;
     private byte[][] heldChain;
+    /** {@link #held} is kept already, as the frame asked for, before its span was known. */
+    private boolean heldKept;
     /** The stream has ended after {@link #held}. */
     private boolean atEnd;
+    /**
+     * What one frame decoded costs, in ns, as lately measured, 0 before one is; and what coming to the frame sought
+     * costs, {@code Long.MAX_VALUE} before a seek is measured. Whether to seek ahead or decode up to it ({@link #skips}).
+     */
+    private long stepNanos;
+    private long seekNanos = Long.MAX_VALUE;
 
     /**
      * Play {@code clip}, which this owns from here, silently. Its info must say its length and its rate
@@ -344,10 +355,13 @@ public final class Footage implements Playable {
         Video video = clip.video();
         try {
             boolean sought = false;
-            if (heldAt < 0 || target < heldAt || target > heldAt + run) {
+            long soughtAt = 0;
+            if (heldAt < 0 || target < heldAt || target > heldAt + run || skips(target)) {
+                soughtAt = System.nanoTime();
                 video.seek(startOf(target) * 1000);
                 held = null;
                 heldChain = null;
+                heldKept = false;
                 heldAt = -1;
                 atEnd = false;
                 sought = true;
@@ -367,19 +381,24 @@ public final class Footage implements Playable {
                     heldAt = -1;
                     return;
                 }
+                long t0 = System.nanoTime();
                 Frame f = video.next();
                 if (f == null) {
                     atEnd = true;
                     continue;
                 }
+                measure(held == null && sought ? soughtAt : t0, held == null && sought, target);
                 int at = (int) Math.max(0, Math.min(Integer.MAX_VALUE, Math.round(f.ptsMicros() * rate / 1e6)));
                 if (held == null) {
                     // The first frame after a seek stands for the number sought, whatever its own rounds to.
                     at = sought ? Math.min(at, target) : at;
                 } else if (at <= heldAt) {
-                    // Two frames on one number: the later one shows.
+                    // Two frames on one number: the later one shows, in place of the earlier if that was kept already.
                     held = f;
                     heldChain = null;
+                    if (heldKept) {
+                        keepHeld();
+                    }
                     continue;
                 } else {
                     cover(heldAt, at - 1);
@@ -387,6 +406,13 @@ public final class Footage implements Playable {
                 held = f;
                 heldChain = null;
                 heldAt = at;
+                heldKept = false;
+                if (at == target) {
+                    // The frame asked for is kept at once, under its own number, rather than once the next frame says
+                    // how long it lasts; and kept even if the window has moved past it meanwhile. A decoder slower than
+                    // the rate is always a little late, and a player late for a frame shows it late rather than none.
+                    keepHeld();
+                }
                 if (!stillWanted(target)) {
                     return;
                 }
@@ -402,6 +428,33 @@ public final class Footage implements Playable {
         } catch (OutOfMemoryError e) {
             ended(target, "too large to decode", e);
             heldAt = -1;
+        }
+    }
+
+    /**
+     * Whether {@code target}, ahead of the decoder, is reached sooner by seeking than by decoding every frame up to it.
+     * Every frame decoded is also scaled and copied out, which costs several times its decoding; a seek decodes from
+     * the keyframe before it and drops what it passes unscaled, at a cost that depends on how far back that keyframe
+     * is. So a decoder behind the window, whose frames up to the one wanted nobody will see, seeks once the frames
+     * between would cost more than seeks have been costing (before one is measured, a quarter of the run's steps).
+     * None between is wanted: the target is the first frame of the window not made yet.
+     */
+    private boolean skips(int target) {
+        long between = target - heldAt - 1L;
+        long seek = seekNanos != Long.MAX_VALUE ? seekNanos : run / 4 * stepNanos;
+        return heldAt >= 0 && between > 0 && stepNanos > 0 && between * stepNanos > seek;
+    }
+
+    /**
+     * Note what a frame just decoded cost, from {@code since}: the seek that came to it, if it is the first after one,
+     * or else the one step. A seek to the first frame is not counted, a keyframe always being there.
+     */
+    private void measure(long since, boolean afterSeek, int target) {
+        long took = System.nanoTime() - since;
+        if (!afterSeek) {
+            stepNanos = stepNanos == 0 ? took : (7 * stepNanos + took) / 8;
+        } else if (target > 0) {
+            seekNanos = seekNanos == Long.MAX_VALUE ? took : (seekNanos + took) / 2;
         }
     }
 
@@ -433,6 +486,20 @@ public final class Footage implements Playable {
                 keep(j, heldChain);
             }
         }
+    }
+
+    /** Keep {@link #held} as frame {@link #heldAt}, wanted by the window or not, unless the stream is shorter. */
+    private void keepHeld() {
+        synchronized (lock) {
+            if (closed || heldAt >= frames) {
+                return;
+            }
+        }
+        if (heldChain == null) {
+            heldChain = MipChain.of(held.rgba(), held.width(), held.height());
+        }
+        keep(heldAt, heldChain);
+        heldKept = true;
     }
 
     private void keep(int k, byte[][] chain) {

@@ -31,7 +31,10 @@ import java.io.IOException;
  *
  * <p><b>A late frame is dropped from a video, and waited for in an animated image</b> ({@link Playable#drops}). Waited
  * for, the feed's time is held until it is made, so a machine too slow for an animation plays it slower; dropped, the
- * frame made next is the one due at the feed's time, and a slow decoder shows fewer frames rather than falling behind.
+ * newest frame made by the feed's time is shown, late if it must be, and if none is, the decoder is asked for the frame
+ * due as far ahead as it took to make the last it was asked for, and given until then to make it. So a slow decoder
+ * shows fewer frames rather than falling behind, and never none: it is not left chasing the frame due now, which it
+ * would always make after its time.
  *
  * <p><b>With a clock of its own</b> ({@link Playable#clock}, a video's sound) the time is the clock's: it starts with
  * the first frame, stops with every pause and hold, goes wherever a seek or a loop goes, and the feed is re-timed from
@@ -55,6 +58,18 @@ public final class Player implements AutoCloseable {
     static final long DRIFT_NANOS = 2_000_000L;
     /** How far a clock of its own may be from where the pictures start again before it is sought there (Playback's). */
     static final long SEEK_SLACK_MS = 40;
+    /**
+     * How many frames before the one due a late video's newest made frame is looked for: well past a decoder's window
+     * ({@code Footage.AHEAD}), so what it made for a window that has since moved on is found.
+     */
+    static final int LATE_LOOK = 16;
+    /** The furthest ahead a late video's next frame is asked for: within the run a decoder walks rather than seeks. */
+    static final long MAX_LEAD_NANOS = 1_000_000_000L;
+    /**
+     * How many frames' time a late video's next frame is waited for, past its own, before the decoder is sent ahead
+     * instead: so the pictures trail the time by at most about this.
+     */
+    static final int LATE_GRACE_FRAMES = 2;
 
     private static final long MS = 1_000_000L;
     private static final Log LOG = Log.of("codec.image");
@@ -109,6 +124,13 @@ public final class Player implements AutoCloseable {
     private long copyStamp;
     private byte[][] copyChain;
     private int copyGeneration;
+    /**
+     * A late video's frame asked for ahead and not yet made, or -1; how far ahead it was asked; and how far ahead the
+     * next will be, in ns.
+     */
+    private int asked = -1;
+    private long askedLead;
+    private long lead;
     /** Something a transport bar shows has changed since {@link #changed} was last run. */
     private boolean owed;
     /** Run on the player's thread, outside its lock, whenever what a transport bar shows has changed. */
@@ -631,15 +653,44 @@ public final class Player implements AutoCloseable {
         }
         long stamp = makePass + m.startOf(next) * MS;
         if (m.drops() && !waiting && stamp + m.delay(next) * MS <= at) {
-            // Late: its time on screen is already over. Make the frame due instead, so the pictures keep up.
+            // Late: its time on screen is already over.
             int due = m.frameAt((at - makePass) / MS);
             if (due > next) {
-                next = due;
+                int made = newestMade(m, next, due);
+                if (made >= 0) {
+                    // Made meanwhile, though late: shown, rather than thrown away for one not made yet.
+                    next = made;
+                } else if (asked >= 0 && makePass + m.startOf(asked) * MS + askedLead > at) {
+                    // One asked for ahead already: waited for, and shown late if it must be, until it is as late as it
+                    // was asked ahead. Given up on sooner, the decoder would drop it just short of making it.
+                    next = asked;
+                } else if (asked >= 0
+                        || stamp + (long) LATE_GRACE_FRAMES * m.delay(next) * MS <= at) {
+                    // None made, and too late to wait for. Not the frame due now, which a decoder slower than the rate
+                    // always makes after its time, chasing it for ever: the one due once it has had as long as it took
+                    // to make the last one asked for, and that one asked for until it is made, so it is shown on time.
+                    if (asked >= 0) {
+                        lead *= 2;   // what was asked for ahead came too late: ask further ahead
+                    }
+                    lead = Math.max(2L * m.delay(due) * MS, Math.min(MAX_LEAD_NANOS, lead));
+                    next = Math.max(due, m.frameAt((at - makePass + lead) / MS));
+                    asked = next;
+                    askedLead = lead;
+                }
+                // Otherwise only a little late, as each frame after one asked for is from a decoder slower than the
+                // rate: it is being made, so it is waited for and shown late, rather than dropped with those after it.
                 stamp = makePass + m.startOf(next) * MS;
             }
         }
         m.want(next, loop);
         byte[][] chain = m.frame(next);
+        if (chain != null && next == asked) {
+            // Made: the next is asked for as much less far ahead as this one came early, or more as it came late, with
+            // half a frame to spare. Not from how long it took, which grows with how far ahead it was asked.
+            long early = makePass + m.startOf(asked) * MS - at;
+            lead = Math.max(2L * m.delay(next) * MS, Math.min(MAX_LEAD_NANOS, lead - early + m.delay(next) * MS / 2));
+            asked = -1;
+        }
         if (chain == null) {
             if (next >= m.count()) {
                 // The file stopped decoding before this frame: it is never coming. Stopped where it is, as at the end.
@@ -667,6 +718,19 @@ public final class Player implements AutoCloseable {
         copyChain = chain;
         copyGeneration = generation;
         return 0;
+    }
+
+    /**
+     * The newest frame from {@code from} to {@code due} that {@code m} has made, looking back at most
+     * {@link #LATE_LOOK} frames from {@code due}, or -1 if none is.
+     */
+    private static int newestMade(Playable m, int from, int due) {
+        for (int j = due; j >= Math.max(from, due - LATE_LOOK); j--) {
+            if (m.frame(j) != null) {
+                return j;
+            }
+        }
+        return -1;
     }
 
     /**
@@ -699,12 +763,14 @@ public final class Player implements AutoCloseable {
         if (next >= m.count() && loop) {
             next = 0;
             makePass += m.duration() * MS;
+            asked = -1;
         }
     }
 
     /** Go to {@code ms} into a pass: everything handed over is stale, and the time waits there for its frame. */
     private void goTo(Playable m, long ms) {
         generation++;
+        asked = -1;
         int to = m.frameAt(ms);
         // A new pass, after everything handed over, starting on a whole number of passes: so a stamp is always so many
         // passes and a time into one, and the feed's time alone says where in the file it is (a seek bar's).
