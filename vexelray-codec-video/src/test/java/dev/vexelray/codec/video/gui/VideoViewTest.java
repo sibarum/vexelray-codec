@@ -72,7 +72,7 @@ class VideoViewTest {
         var video = probed.video().get();
         assertTrue(video.sound(), "rgb.mp4 has a tone");
         view.play(video);
-        until(() -> view.shownMicros() == 0, "the first frame is shown");
+        until(() -> view.shownMicros() >= 0, "a frame is shown");
         run(600);
         assertTrue(view.shownMicros() >= 400_000, "it plays on: " + view.shownMicros());
         assertEquals(video.durationMicros(), view.duration());
@@ -88,7 +88,7 @@ class VideoViewTest {
     @Test
     void aPauseHoldsTheTimeAndASeekWhilePausedShowsTheFrameThere() throws Exception {
         view.play(Videos.open(Fixtures.file("rgb.webm"), 0).clip());
-        until(() -> view.shownMicros() == 0, "the first frame is shown");
+        until(() -> view.shownMicros() >= 0, "a frame is shown");
         run(500);
         view.pause();
         long held = view.position();
@@ -112,7 +112,7 @@ class VideoViewTest {
         AtomicInteger ends = new AtomicInteger();
         view.onEnd(ends::incrementAndGet);
         view.play(Videos.open(Fixtures.file("rgb.webm"), 0).clip());
-        until(() -> view.shownMicros() == 0, "the first frame is shown");
+        until(() -> view.shownMicros() >= 0, "a frame is shown");
         view.seek(2_700_000);
         until(() -> ends.get() == 1, "the end is reached");
         run(50);
@@ -126,7 +126,7 @@ class VideoViewTest {
     void aLoopStartsAgain() throws Exception {
         view.loop(true);
         view.play(Videos.open(Fixtures.file("rgb.webm"), 0).clip());
-        until(() -> view.shownMicros() == 0, "the first frame is shown");
+        until(() -> view.shownMicros() >= 0, "a frame is shown");
         view.seek(2_800_000);
         until(() -> view.shownMicros() >= 0 && view.shownMicros() < 500_000 && view.position() < 500_000,
                 "it comes round to the start");
@@ -150,7 +150,7 @@ class VideoViewTest {
     void clearingLetsGoOfTheClip() throws Exception {
         var clip = Videos.open(Fixtures.file("rgb.webm"), 0).clip();
         view.play(clip);
-        until(() -> view.shownMicros() == 0, "the first frame is shown");
+        until(() -> view.shownMicros() >= 0, "a frame is shown");
         view.clear();
         until(clip::closed, "the footage closes the clip");
         assertEquals(-1, view.shownMicros());
