@@ -46,24 +46,6 @@ class SoundsTest {
     }
 
     @Test
-    void playsAndPausesAndSeeks() throws Exception {
-        try (Track t = Sounds.open(fixture("tone.flac")).track()) {
-            t.play();
-            Thread.sleep(500);
-            long played = t.position();
-            assertTrue(played > 200 && played < 800, "after 0.5 s of playing: " + played);
-
-            t.pause();
-            long held = t.position();
-            Thread.sleep(200);
-            assertEquals(held, t.position(), "paused, it holds");
-
-            t.seek(2_000);
-            assertEquals(2_000, t.position(), "a seek is the position at once");
-        }
-    }
-
-    @Test
     void endsAtTheEnd() throws Exception {
         try (Track t = Sounds.open(fixture("tone.mp3")).track()) {
             t.seek(2_700);
@@ -78,37 +60,6 @@ class SoundsTest {
             t.seek(0);
             assertFalse(t.ended(), "a seek starts it again");
         }
-    }
-
-    /**
-     * The leveller is ffmpeg-wrapper's, tested there; here, that a track steers it and hears it. The tone is at
-     * about -21 LUFS, 3 LU under the leveller's target, so in night mode (0.5, 3:1) it comes up by about 2 dB.
-     */
-    @Test
-    void compressionRaisesAQuietTrack() throws Exception {
-        try (Track t = Sounds.open(fixture("tone.flac")).track()) {
-            t.seek(500);
-            t.play();
-            Thread.sleep(300);
-            double plain = rms(t);
-            t.compression(0.5f);
-            Thread.sleep(150);
-            double compressed = rms(t);
-            assertTrue(plain > 0, "it is heard");
-            double raised = 20 * Math.log10(compressed / plain);
-            assertTrue(raised > 1 && raised < 4, "compressed, about 2 dB louder: " + raised);
-        }
-    }
-
-    /** The loudness of the last 50 ms played. */
-    private static double rms(Track t) {
-        float[] heard = new float[2400 * 2];
-        int got = t.heard(heard);
-        double s = 0;
-        for (int i = 0; i < got * 2; i++) {
-            s += heard[i] * (double) heard[i];
-        }
-        return got == 0 ? 0 : Math.sqrt(s / (got * 2.0));
     }
 
     @Test

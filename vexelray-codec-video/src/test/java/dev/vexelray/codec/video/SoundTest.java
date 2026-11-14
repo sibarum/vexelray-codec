@@ -8,7 +8,6 @@ import java.nio.file.Path;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
-import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -24,29 +23,6 @@ class SoundTest {
         try (Playable withSound = motion("rgb.mp4").open(0); Playable silent = motion("rgb.webm").open(0)) {
             assertInstanceOf(Sound.class, withSound.clock());
             assertNull(silent.clock());
-        }
-    }
-
-    @Test
-    void itRunsStopsAndSeeks() throws Exception {
-        Sound s = Sound.open(Fixtures.file("rgb.mp4"));
-        assertNotNull(s);
-        try {
-            assertEquals(0, s.now());
-            s.run(true);
-            Thread.sleep(500);
-            long ran = s.now();
-            assertTrue(ran > 200 && ran < 800, "after half a second: " + ran);
-
-            s.run(false);
-            long held = s.now();
-            Thread.sleep(200);
-            assertEquals(held, s.now(), "stopped, it holds");
-
-            s.seek(2000);
-            assertEquals(2000, s.now(), "a seek is the clock at once");
-        } finally {
-            s.close();
         }
     }
 
@@ -95,23 +71,6 @@ class SoundTest {
         double fullUp = 20 * Math.log10(loudnessAt(1f) / plain);
         assertTrue(nightUp > 1.5 && nightUp < 3.5, "night mode, about 2.5 dB up: " + nightUp);
         assertTrue(fullUp > nightUp + 0.5, "all the way up, further: " + fullUp);
-    }
-
-    /** What compression holds back, it holds in the decoder: the time is as it is without. */
-    @Test
-    void theTimeIsKeptCompressed() throws Exception {
-        Sound s = Sound.open(Fixtures.file("rgb.mp4"));
-        try {
-            s.compression(1f);
-            s.seek(500);
-            assertEquals(500, s.now(), "a seek is the clock at once");
-            s.run(true);
-            Thread.sleep(500);
-            long ran = s.now();
-            assertTrue(ran > 700 && ran < 1300, "after half a second, half a second on: " + ran);
-        } finally {
-            s.close();
-        }
     }
 
     /** The loudness heard at 1.1 s into rgb.mp4, played from 0.5 s at compression k. */

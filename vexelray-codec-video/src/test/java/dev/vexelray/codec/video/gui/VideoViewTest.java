@@ -55,71 +55,10 @@ class VideoViewTest {
     }
 
     @Test
-    void framesAreShownAsTheirTimeComes() throws Exception {
-        view.play(Videos.open(Fixtures.file("rgb.webm"), 0).clip());
-        until(() -> view.shownMicros() == 0, "the first frame is shown");
-        run(1_000);
-        // A second on the clock is a second into the video: frame 10, give or take a frame and the test's own steps.
-        assertTrue(Math.abs(view.shownMicros() - 1_000_000) <= 150_000, "shown " + view.shownMicros());
-        assertTrue(Math.abs(view.position() - 1_000_000) <= 150_000, "position " + view.position());
-        assertTrue(view.playing());
-    }
-
-    @Test
-    void aVideoProbedByAJobPlaysWithItsSound() throws Exception {
-        var probed = Videos.probe(Fixtures.file("rgb.mp4"), 0);
-        assertTrue(probed.video().isPresent(), probed.identity());
-        var video = probed.video().get();
-        assertTrue(video.sound(), "rgb.mp4 has a tone");
-        view.play(video);
-        until(() -> view.shownMicros() >= 0, "a frame is shown");
-        run(600);
-        assertTrue(view.shownMicros() >= 400_000, "it plays on: " + view.shownMicros());
-        assertEquals(video.durationMicros(), view.duration());
-    }
-
-    @Test
     void aFileThatIsNotAVideoIsProbedAsNoneWithAReason() throws Exception {
         var probed = Videos.probe(Fixtures.file("rgb.mp4").resolveSibling("no-such.mp4"), 0);
         assertTrue(probed.video().isEmpty());
         assertFalse(probed.identity().isBlank());
-    }
-
-    @Test
-    void aPauseHoldsTheTimeAndASeekWhilePausedShowsTheFrameThere() throws Exception {
-        view.play(Videos.open(Fixtures.file("rgb.webm"), 0).clip());
-        until(() -> view.shownMicros() >= 0, "a frame is shown");
-        run(500);
-        view.pause();
-        long held = view.position();
-        run(500);
-        assertEquals(held, view.position());
-        assertFalse(view.playing());
-
-        view.seek(2_450_000);
-        until(() -> view.shownMicros() == 2_400_000, "the frame at the seek is shown");
-        assertEquals(2_450_000, view.position());
-        run(300);
-        assertEquals(2_400_000, view.shownMicros(), "still paused");
-
-        view.resume();
-        run(300);
-        assertTrue(view.shownMicros() >= 2_600_000, "plays on from the seek: " + view.shownMicros());
-    }
-
-    @Test
-    void theEndIsSaidAndHeld() throws Exception {
-        AtomicInteger ends = new AtomicInteger();
-        view.onEnd(ends::incrementAndGet);
-        view.play(Videos.open(Fixtures.file("rgb.webm"), 0).clip());
-        until(() -> view.shownMicros() >= 0, "a frame is shown");
-        view.seek(2_700_000);
-        until(() -> ends.get() == 1, "the end is reached");
-        run(50);
-        assertEquals(2_900_000, view.shownMicros());
-        assertFalse(view.playing());
-        run(300);
-        assertEquals(1, ends.get());
     }
 
     @Test

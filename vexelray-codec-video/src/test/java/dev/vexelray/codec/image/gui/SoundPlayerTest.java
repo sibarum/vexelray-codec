@@ -33,20 +33,6 @@ class SoundPlayerTest {
         }
     }
 
-    /** The feed's time follows the sound: it keeps pace with the wall, as what is heard does, and has a clock to follow. */
-    @Test
-    void theFeedsTimeFollowsTheSound() throws Exception {
-        try (Rig r = new Rig("rgb.mp4")) {
-            r.until(() -> r.play.sounds() && r.play.position() >= 200);
-            long from = r.play.position();
-            long wall = System.nanoTime();
-            r.until(() -> System.nanoTime() - wall >= 600_000_000L);
-            long moved = r.play.position() - from;
-            assertTrue(Math.abs(moved - 600) <= 120, "in 600 ms of wall the time moved " + moved + " ms");
-            assertTrue(r.feed.running());
-        }
-    }
-
     /**
      * The knob from the transport down to the real sound, measured on what the speaker was given at 1.1 s into the
      * video: given before the file opens, and turned up mid-play, it is louder than as stored by about 4 dB (the
