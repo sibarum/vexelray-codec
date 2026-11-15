@@ -16,12 +16,15 @@ and belongs to vexelray-gui's device feed (`vexelray-gui/docs/plans/device-feed.
   uploads those planes and converts in the shader. The planes are valid only until the next `decode`, `seek` or
   `close`, so Footage would have to upload them, or copy them out, before it decodes on. Today it converts at that
   same point.
-- **Mips.** `OpaqueMips` makes them on the CPU, multi-threaded, about a third of a shown frame's cost. On the GPU
-  they'd be a blit chain or a compute pass after the upload.
-- **The copy into the feed's slot.** `Player.once` copies a kept chain into a feed slot (about 11 MB at 1080p, on the
-  player's thread). Footage makes frames ahead into its own cache, so stepping back and looping cost nothing, and so
-  it can't write into a slot it doesn't have yet. With the device feed the slot would be a GPU image, and the copy
-  becomes the upload.
+- ~~**Mips.**~~ **Done 2026-11-14** for a video shown in a window: its feed is on the device and the GPU makes the
+  mips (`Playable.mips(false)`; `OpaqueMips` runs only for a device-free feed, a tree no window has shown).
+- ~~**The copy into the feed's slot.**~~ **Done 2026-11-14**: `Player.once` copies level 0 alone into the slot's
+  staging (8 MB at 1080p RGBA, a quarter less than the chain), and the frame that shows it lands it. The planes would
+  make it 3 MB.
+- **`Videos.open` calls a 1080p AVI "a folder".** Seen 2026-11-14 with `big_buck_bunny_1080p_stereo.avi` in the
+  GitHub folder, a regular file with two hard links, through the video-player demo launched with `java` directly as
+  well as through Maven: the readout said `a folder`, which only `Files.isDirectory(path)` answers. An mp4 and an mkv
+  in other folders opened. Not looked into.
 - **Formats beyond 8-bit 4:2:0.** `convert` handles any format swscale knows. A shader path needs a converter per
   layout: at least `yuv420p`, `nv12` and the 10-bit `p010`/`yuv420p10le`. Anything else can fall back to `convert`.
 
