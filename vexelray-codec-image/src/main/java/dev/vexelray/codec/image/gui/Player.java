@@ -557,9 +557,19 @@ public final class Player implements AutoCloseable {
             }
         }
         if (feed.onDevice()) {
-            // Level 0 into the slot's staging, on this thread; the frame that shows it lands it and makes its mips.
+            // Level 0, or the planes packed, into the slot's staging on this thread; the frame that shows it lands it.
+            long bytes = feed.stagingBytes();
+            if (copyChain[0].length != bytes) {
+                // Made in the form before the feed was staged (RGBA, the planes asked for since): not this slot's.
+                synchronized (lock) {
+                    feed.drop(copySlot);
+                    copySlot = -1;
+                    copyChain = null;
+                }
+                return LOOK_AGAIN_NANOS;
+            }
             java.lang.foreign.MemorySegment.copy(java.lang.foreign.MemorySegment.ofArray(copyChain[0]), 0,
-                    feed.staging(copySlot), 0, feed.levelBytes(0));
+                    feed.staging(copySlot), 0, bytes);
         } else {
             for (int l = 0; l < feed.levels(); l++) {
                 System.arraycopy(copyChain[l], 0, feed.level(copySlot, l), 0, feed.levelBytes(l));
@@ -596,8 +606,12 @@ public final class Player implements AutoCloseable {
             }
             return false;
         }
-        // A device feed's mips are the GPU's: the frames need only their first level.
+        // A device feed's mips are the GPU's: the frames need only their first level, or the decoder's planes, which
+        // the GPU converts too, when the source can give them. Staged once, before the first slot is taken.
         m.mips(!feed.onDevice());
+        if (feed.onDevice() && feed.deviceSlots() == null) {
+            feed.stage(m.planes(feed.width(), feed.height()));
+        }
         synchronized (lock) {
             if (closed) {
                 m.close();

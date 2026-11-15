@@ -63,6 +63,17 @@ public interface Playable extends AutoCloseable {
     }
 
     /**
+     * Ask for the frames as a decoder's planes, which a device feed converts on the GPU (vexelray-gui's
+     * docs/plans/device-feed.md B), at {@code width x height}: the layout they come in from now, each {@link #frame}
+     * then one array of the planes packed ({@code PlaneLayout.frameBytes}), or null when this source cannot, and its
+     * frames stay RGBA. A video can when its decoder's format is one the GPU converts and its frames are not scaled.
+     * May wait for the first frame to be decoded, so the player's thread asks, once, before its first {@link #want}.
+     */
+    default dev.vexelray.vulkan.present.PlaneLayout planes(int width, int height) {
+        return null;
+    }
+
+    /**
      * A clock this keeps for itself, which whoever shows it keeps time by instead of its own; or null, the usual
      * case, when it has none. A video with sound has one: sound is heard at the speaker's own pace, so the frames
      * follow the sound, never the other way round.

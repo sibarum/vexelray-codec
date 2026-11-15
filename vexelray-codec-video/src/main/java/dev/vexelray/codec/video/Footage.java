@@ -9,10 +9,16 @@ import sibarum.ffmpeg.VideoInfo;
 import sibarum.probe.Log;
 
 import java.io.IOException;
+import dev.vexelray.vulkan.present.PlaneLayout;
+import sibarum.ffmpeg.Planes;
+
+import java.lang.foreign.MemorySegment;
 import java.util.ArrayDeque;
 import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
 
 /**
  * A video as a picture that plays: its frames by number, at the rate the stream declares, each given its mip chain on
@@ -108,6 +114,12 @@ public final class Footage implements Playable {
     private final ArrayDeque<byte[][]> spare = new ArrayDeque<>();
     /** Whether a frame is given its mips here ({@link #mips}): not when a device feed shows it, whose GPU makes them. */
     private volatile boolean mips = true;
+    /** The frames' form when they are kept as the decoder's planes ({@link #planes}); null while they are RGBA. */
+    private volatile PlaneLayout form;
+    /** The layout of the first frame decoded, or null when the GPU cannot convert it; known once {@link #first} is. */
+    private volatile PlaneLayout firstLayout;
+    /** Counted down when the first frame is decoded, or the decoding ends without one. */
+    private final CountDownLatch first = new CountDownLatch(1);
     /** The chain {@link #frame} last gave out, which the player may be copying: never written again until another is. */
     private byte[][] lent;
 
@@ -277,6 +289,69 @@ public final class Footage implements Playable {
         }
     }
 
+    /** How long {@link #planes} waits for the first frame to be decoded before keeping the frames RGBA. */
+    private static final long FIRST_FRAME_SECONDS = 5;
+
+    /**
+     * Keep the frames as the decoder's planes from now, packed, for a device feed to convert on the GPU: when the first
+     * frame decoded is in a format the GPU converts and the frames are this size, which is not scaled. Waits for that
+     * first frame (it is decoded as soon as the footage opens, frame 0 being wanted from the start). What was kept as
+     * RGBA meanwhile is let go, and made again as planes when it is wanted.
+     */
+    @Override
+    public PlaneLayout planes(int width, int height) {
+        if (width != this.width || height != this.height) {
+            return null;
+        }
+        try {
+            if (!first.await(FIRST_FRAME_SECONDS, TimeUnit.SECONDS)) {
+                return null;
+            }
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            return null;
+        }
+        PlaneLayout layout = firstLayout;
+        if (layout == null) {
+            return null;
+        }
+        synchronized (lock) {
+            form = layout;
+            kept.clear();
+            keptBytes = 0;
+            spare.clear();
+            lock.notifyAll();   // what was kept is missing again
+        }
+        return layout;
+    }
+
+    /** On the decoder's thread, after each frame decoded: the first says which layout the frames come in. */
+    private void noteFirst(Video video) {
+        if (first.getCount() == 0) {
+            return;
+        }
+        Planes p = video.planes();
+        PlaneLayout.Format f = PlaneLayout.Format.named(p.format());
+        firstLayout = f != null && p.width() == width && p.height() == height
+                ? new PlaneLayout(f, p.matrix(), p.fullRange()) : null;
+        first.countDown();
+    }
+
+    /** The decoder's frame packed into {@code dst}, plane after plane, each row without its stride's padding. */
+    private void pack(Planes planes, PlaneLayout layout, byte[] dst) {
+        MemorySegment out = MemorySegment.ofArray(dst);
+        for (int p = 0; p < layout.planes(); p++) {
+            long at = layout.planeOffset(p, width, height);
+            int row = layout.rowBytes(p, width);
+            int rows = layout.planeHeight(p, height);
+            int stride = planes.strides()[p];
+            MemorySegment src = planes.data()[p].reinterpret((long) stride * rows);
+            for (int r = 0; r < rows; r++) {
+                MemorySegment.copy(src, (long) r * stride, out, at + (long) r * row, row);
+            }
+        }
+    }
+
     /** Shown through a device feed, a frame is converted into its first level and given no mips here. */
     @Override
     public void mips(boolean wanted) {
@@ -368,6 +443,7 @@ public final class Footage implements Playable {
             // this is told so, rather than waiting on a thread that is no longer there.
             ended(0, Reasons.failed(e), e);
         } finally {
+            first.countDown();   // a player waiting to hear the layout is not left waiting for a thread that has gone
             try {
                 clip.close();
             } catch (RuntimeException | LinkageError e) {
@@ -428,6 +504,7 @@ public final class Footage implements Playable {
                     atEnd = true;
                     continue;
                 }
+                noteFirst(video);
                 measure(!held && sought ? soughtAt : t0, !held && sought, target);
                 int at = (int) Math.max(0, Math.min(Integer.MAX_VALUE, Math.round(pts * rate / 1e6)));
                 if (!held) {
@@ -599,6 +676,17 @@ public final class Footage implements Playable {
         synchronized (lock) {
             chain = spare.poll();
         }
+        PlaneLayout planar = form;
+        if (planar != null) {
+            // Kept as the decoder made it, for the GPU to convert: the planes packed into one array.
+            int bytes = (int) planar.frameBytes(width, height);
+            if (chain == null || chain.length != 1 || chain[0].length != bytes) {
+                chain = new byte[][] {new byte[bytes]};
+            }
+            pack(video.planes(), planar, chain[0]);
+            heldChain = chain;
+            return;
+        }
         boolean withMips = mips;
         if (chain == null || (withMips && chain.length == 1)) {
             chain = withMips ? OpaqueMips.chain(width, height) : new byte[][] {new byte[width * height * 4]};
@@ -610,7 +698,17 @@ public final class Footage implements Playable {
         heldChain = chain;
     }
 
+    /** Whether {@code chain} is in the form the frames are kept in now: the planes packed, or RGBA levels. */
+    private boolean inForm(byte[][] chain) {
+        PlaneLayout planar = form;
+        boolean packed = chain.length == 1 && planar != null && chain[0].length == planar.frameBytes(width, height);
+        return planar == null ? chain[0].length == width * height * 4 : packed;
+    }
+
     private void keep(int k, byte[][] chain) {
+        if (!inForm(chain)) {
+            return;   // made as RGBA before the frames were asked for as planes: made again when wanted
+        }
         long bytes = 0;
         for (byte[] level : chain) {
             bytes += level.length;
