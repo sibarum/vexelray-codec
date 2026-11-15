@@ -74,6 +74,66 @@ public interface Playable extends AutoCloseable {
     }
 
     /**
+     * Ask for the frames decoded straight into memory {@code lender} lends (a device feed's, which the GPU copies
+     * from), so no byte is copied on the way: the layout they come in from now, each frame then reached through
+     * {@link #lent} rather than {@link #frame}; or null when this source cannot, and it is asked for {@link #planes}
+     * instead. As {@link #planes}, it may wait for the first frame, so the player's thread asks, once, before its first
+     * {@link #want}. A source that says yes calls {@link Lender#letGo} once nothing it runs writes the memory again.
+     */
+    default dev.vexelray.vulkan.present.PlaneLayout decodeInto(int width, int height, Lender lender) {
+        return null;
+    }
+
+    /**
+     * Frame {@code i} in lent memory ({@link #decodeInto}): where it is, with a new reference to it that keeps its
+     * memory from being decoded into again until {@linkplain #release released}; or null if it has not been made.
+     */
+    default Lent lent(int i) {
+        return null;
+    }
+
+    /** Let go of a reference {@link #lent} gave. Any thread, and after {@link #close} too. */
+    default void release(long token) {
+    }
+
+    /** Whether frame {@code i} has been made: {@link #frame} or {@link #lent} would give it now. */
+    default boolean made(int i) {
+        return frame(i) != null;
+    }
+
+    /**
+     * Memory lent to a source to decode into by whoever shows its frames: a device feed's chunks of host-visible
+     * memory, which its GPU copies each frame from where it was decoded. Every method may be called from any thread.
+     */
+    interface Lender {
+
+        /**
+         * The frames will come in {@code planes}: said by {@link #decodeInto}, on the asker's thread, before anything is
+         * lent, so the memory is made for them. Once.
+         */
+        void stage(dev.vexelray.vulkan.present.PlaneLayout planes);
+
+        /** A new chunk of {@code bytes}, mapped: its index, or -1 when no more can be lent. */
+        int lend(long bytes);
+
+        /** Chunk {@code index}, as {@link #lend} made it. */
+        java.lang.foreign.MemorySegment chunk(int index);
+
+        /**
+         * Nothing the source runs will write the chunks again (its decoder is closed): whatever references the lender
+         * still holds go to {@code release}, and the chunks are its to free. Once.
+         */
+        void letGo(java.util.function.LongConsumer release);
+    }
+
+    /**
+     * A frame in lent memory: {@code token}, a reference to it ({@link #release}), and where it is, chunk
+     * {@code chunk} with plane {@code p} starting {@code offsets[p]} bytes in and its rows {@code strides[p]} apart.
+     */
+    record Lent(long token, int chunk, long[] offsets, int[] strides) {
+    }
+
+    /**
      * A clock this keeps for itself, which whoever shows it keeps time by instead of its own; or null, the usual
      * case, when it has none. A video with sound has one: sound is heard at the speaker's own pace, so the frames
      * follow the sound, never the other way round.

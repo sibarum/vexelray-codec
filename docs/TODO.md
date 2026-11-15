@@ -21,6 +21,12 @@ and belongs to vexelray-gui's device feed (`vexelray-gui/docs/plans/device-feed.
 - ~~**The copy into the feed's slot.**~~ **Done 2026-11-14**: `Player.once` copies level 0 alone into the slot's
   staging (8 MB at 1080p RGBA, a quarter less than the chain), and the frame that shows it lands it. The planes would
   make it 3 MB.
+  **Then no copy at all, 2026-11-15**: a device feed lends the decoder its staging (`Playable.decodeInto`, a
+  `Lender`), ffmpeg-wrapper's shim decodes each frame straight into a block of it, `Footage` keeps frames as references
+  to their blocks (`Kept`), and the `Player` hands a slot over by a reference (`Playable.lent`) with nothing copied on
+  the CPU; the GPU copies the planes from where the decoder put them. dav1d's AV1 decodes into memory of its own, so
+  its kept frames are copied once, in the shim. A source the GPU cannot convert, or a device-free feed, still takes
+  the chains above.
 - **`Videos.open` calls a 1080p AVI "a folder".** Seen 2026-11-14 with `big_buck_bunny_1080p_stereo.avi` in the
   GitHub folder, a regular file with two hard links, through the video-player demo launched with `java` directly as
   well as through Maven: the readout said `a folder`, which only `Files.isDirectory(path)` answers. An mp4 and an mkv

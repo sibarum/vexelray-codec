@@ -129,6 +129,10 @@ public final class Player implements AutoCloseable {
     private long copyStamp;
     private byte[][] copyChain;
     private int copyGeneration;
+    /** Or, on a lent feed, the frame where it was decoded, handed over by its token with nothing copied. */
+    private Playable.Lent copyLent;
+    /** The movie's {@link Playable#release}, made once, which a lent feed gives its tokens back through. */
+    private java.util.function.LongConsumer release;
     /**
      * A late video's frame asked for ahead and not yet made, or -1; how far ahead it was asked; and how far ahead the
      * next will be, in ns.
@@ -555,6 +559,11 @@ public final class Player implements AutoCloseable {
             if (copySlot < 0) {
                 return sleep;
             }
+            if (copyLent != null) {
+                // Decoded where the GPU copies it from: handed over by its token, with nothing to copy here.
+                handOver();
+                return 0;
+            }
         }
         if (feed.onDevice()) {
             // Level 0, or the planes packed, into the slot's staging on this thread; the frame that shows it lands it.
@@ -607,9 +616,12 @@ public final class Player implements AutoCloseable {
             return false;
         }
         // A device feed's mips are the GPU's: the frames need only their first level, or the decoder's planes, which
-        // the GPU converts too, when the source can give them. Staged once, before the first slot is taken.
+        // the GPU converts too, when the source can give them; best of all decoded straight into memory the feed lends,
+        // which the GPU copies from where they were decoded. Staged once, before the first slot is taken.
         m.mips(!feed.onDevice());
-        if (feed.onDevice() && feed.deviceSlots() == null) {
+        release = m::release;
+        if (feed.onDevice() && feed.deviceSlots() == null
+                && m.decodeInto(feed.width(), feed.height(), lender()) == null) {
             feed.stage(m.planes(feed.width(), feed.height()));
         }
         synchronized (lock) {
@@ -643,6 +655,31 @@ public final class Player implements AutoCloseable {
         }
     }
 
+    /** The feed as memory a source decodes into: staged lent when the source says how, then its chunks. */
+    private Playable.Lender lender() {
+        return new Playable.Lender() {
+            @Override
+            public void stage(dev.vexelray.vulkan.present.PlaneLayout planes) {
+                feed.stageLent(planes);
+            }
+
+            @Override
+            public int lend(long bytes) {
+                return feed.lend(bytes);
+            }
+
+            @Override
+            public java.lang.foreign.MemorySegment chunk(int index) {
+                return feed.chunk(index);
+            }
+
+            @Override
+            public void letGo(java.util.function.LongConsumer release) {
+                feed.letGo(release);
+            }
+        };
+    }
+
     /** Let go of the decoder and its file, and stop its sound: closed for good. The feed stays its owner's. */
     void shut() {
         Playable own;
@@ -668,6 +705,10 @@ public final class Player implements AutoCloseable {
         Playable m = movie;
         if (m == null) {
             return MAX_SLEEP_NANOS;
+        }
+        if (feed.lent()) {
+            // Frames no window can read any more: their memory is the decoder's again, and their slots the feed's.
+            feed.reclaim(release);
         }
         if (seekTo >= 0) {
             goTo(m, seekTo);
@@ -720,15 +761,18 @@ public final class Player implements AutoCloseable {
             }
         }
         m.want(next, loop);
-        byte[][] chain = m.frame(next);
-        if (chain != null && next == asked) {
+        // On a lent feed the frame is reached where it was decoded (lent), else as a chain to copy.
+        boolean lentFeed = feed.lent();
+        byte[][] chain = lentFeed ? null : m.frame(next);
+        boolean made = lentFeed ? m.made(next) : chain != null;
+        if (made && next == asked) {
             // Made: the next is asked for as much less far ahead as this one came early, or more as it came late, with
             // half a frame to spare. Not from how long it took, which grows with how far ahead it was asked.
             long early = makePass + m.startOf(asked) * MS - at;
             lead = Math.max(2L * m.delay(next) * MS, Math.min(MAX_LEAD_NANOS, lead - early + m.delay(next) * MS / 2));
             asked = -1;
         }
-        if (chain == null) {
+        if (!made) {
             if (next >= m.count()) {
                 // The file stopped decoding before this frame: it is never coming. Stopped where it is, as at the end.
                 ended = true;
@@ -750,6 +794,15 @@ public final class Player implements AutoCloseable {
             // The ring is full: a slot comes free when the next frame handed over is shown.
             return untilNext(at);
         }
+        if (lentFeed) {
+            Playable.Lent l = m.lent(next);
+            if (l == null) {
+                // Let go of by the source since it said it was made (a seek, its budget): looked for again.
+                feed.drop(slot);
+                return LOOK_AGAIN_NANOS;
+            }
+            copyLent = l;
+        }
         copySlot = slot;
         copyStamp = stamp;
         copyChain = chain;
@@ -763,7 +816,7 @@ public final class Player implements AutoCloseable {
      */
     private static int newestMade(Playable m, int from, int due) {
         for (int j = due; j >= Math.max(from, due - LATE_LOOK); j--) {
-            if (m.frame(j) != null) {
+            if (m.made(j)) {
                 return j;
             }
         }
@@ -777,14 +830,23 @@ public final class Player implements AutoCloseable {
     void handOver() {
         int slot = copySlot;
         long stamp = copyStamp;
+        Playable.Lent l = copyLent;
         copySlot = -1;
         copyChain = null;
+        copyLent = null;
         Playable m = movie;
         if (m == null || closed || copyGeneration != generation) {
             feed.drop(slot);
+            if (l != null) {
+                release.accept(l.token());
+            }
             return;
         }
-        feed.handOver(slot, stamp);
+        if (l != null) {
+            feed.handOver(slot, stamp, l.token(), l.chunk(), l.offsets(), l.strides());
+        } else {
+            feed.handOver(slot, stamp);
+        }
         owed = true;
         lastStamp = stamp;
         if (waiting) {

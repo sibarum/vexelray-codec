@@ -4,6 +4,7 @@ import dev.vexelray.codec.image.Glimpses;
 import dev.vexelray.codec.image.Motion;
 import dev.vexelray.codec.image.Playable;
 import dev.vexelray.codec.image.Reasons;
+import sibarum.ffmpeg.Kept;
 import sibarum.ffmpeg.Video;
 import sibarum.ffmpeg.VideoInfo;
 import sibarum.probe.Log;
@@ -100,8 +101,8 @@ public final class Footage implements Playable {
 
     private final Object lock = new Object();
     // Guarded by lock.
-    /** Frames made, each its whole mip chain, the least recently shown first. */
-    private final LinkedHashMap<Integer, byte[][]> kept = new LinkedHashMap<>(16, 0.75f, true);
+    /** Frames made, each its whole mip chain or where it was decoded, the least recently shown first. */
+    private final LinkedHashMap<Integer, Made> kept = new LinkedHashMap<>(16, 0.75f, true);
     private long keptBytes;
     private int wanted;
     private boolean wrap = true;
@@ -122,6 +123,60 @@ public final class Footage implements Playable {
     private final CountDownLatch first = new CountDownLatch(1);
     /** The chain {@link #frame} last gave out, which the player may be copying: never written again until another is. */
     private byte[][] lent;
+    /**
+     * Who lends the memory frames are decoded straight into ({@link #decodeInto}), or null while they are made as
+     * chains. Set once, before the decoder is told; read by the decoder's thread.
+     */
+    private volatile Playable.Lender lender;
+    /** The decoder's: how many bytes it has been lent, which it stops asking for more past {@link #LEND_CAP}. */
+    private long lentBytes;
+    /** The decoder's: whether running out of lent memory was logged, so it is said once. */
+    private boolean saidFull;
+
+    /** More memory is asked for when fewer frames than this fit what is lent. */
+    private static final int LOW_ROOM = 20;
+    /** And then this many frames' worth more. */
+    private static final int CHUNK_FRAMES = 24;
+    /** At most this much is lent: the budget for frames kept, and the decoder's own working set, twice over. */
+    static final long LEND_CAP = 3 * BUDGET;
+
+    /**
+     * A frame made: a chain of levels (RGBA, or the planes packed) a player copies; or, decoded into lent memory, a
+     * reference to it ({@link Kept}) and where it is, which a player hands on with nothing copied. One may be kept
+     * under several numbers. A lent one's reference is released once, when it is neither kept nor held.
+     */
+    private static final class Made {
+        final byte[][] chain;
+        final long kept;
+        final int chunk;
+        final long[] offsets;
+        final int[] strides;
+        final long bytes;
+        /** Guarded by the footage's lock. */
+        boolean released;
+
+        Made(byte[][] chain) {
+            this.chain = chain;
+            this.kept = 0;
+            this.chunk = -1;
+            this.offsets = null;
+            this.strides = null;
+            long b = 0;
+            for (byte[] level : chain) {
+                b += level.length;
+            }
+            this.bytes = b;
+        }
+
+        Made(long kept, int chunk, long[] offsets, int[] strides, long bytes) {
+            this.chain = null;
+            this.kept = kept;
+            this.chunk = chunk;
+            this.offsets = offsets;
+            this.strides = strides;
+            this.bytes = bytes;
+        }
+    }
 
     // The decoder's, on its own thread only.
     /**
@@ -131,7 +186,7 @@ public final class Footage implements Playable {
      */
     private boolean held;
     private int heldAt = -1;
-    private byte[][] heldChain;
+    private Made heldChain;
     private boolean heldLive;
     /** {@link #held} is kept already, as the frame asked for, before its span was known. */
     private boolean heldKept;
@@ -281,12 +336,79 @@ public final class Footage implements Playable {
     @Override
     public byte[][] frame(int i) {
         synchronized (lock) {
-            byte[][] chain = kept.get(i);
-            if (chain != null) {
-                lent = chain;
+            Made m = kept.get(i);
+            if (m == null || m.chain == null) {
+                return null;
             }
-            return chain;
+            lent = m.chain;
+            return m.chain;
         }
+    }
+
+    @Override
+    public boolean made(int i) {
+        synchronized (lock) {
+            return kept.containsKey(i);
+        }
+    }
+
+    /** Frame {@code i} where it was decoded, with a reference of the caller's own; null if not made, or not lent. */
+    @Override
+    public Lent lent(int i) {
+        synchronized (lock) {
+            Made m = kept.get(i);
+            if (m == null || m.kept == 0) {
+                return null;
+            }
+            long ref = Kept.ref(m.kept);
+            return ref == 0 ? null : new Lent(ref, m.chunk, m.offsets, m.strides);
+        }
+    }
+
+    @Override
+    public void release(long token) {
+        Kept.release(token);
+    }
+
+    /**
+     * Decode the frames straight into memory {@code lender} lends from now, so the GPU copies each from where it was
+     * decoded and nothing copies it before: when the first frame is in a format the GPU converts and the frames are
+     * this size, as for {@link #planes}. The decoder lends itself more as it needs it. What was kept as chains
+     * meanwhile is let go, and made again in the lent memory when it is wanted.
+     */
+    @Override
+    public PlaneLayout decodeInto(int width, int height, Lender lender) {
+        PlaneLayout layout = firstLayoutAt(width, height);
+        if (layout == null) {
+            return null;
+        }
+        lender.stage(layout);
+        LOG.debug("{} decodes straight into lent memory, as {}", clip.stamp().path(), layout);
+        synchronized (lock) {
+            this.lender = lender;
+            form = layout;
+            kept.clear();
+            keptBytes = 0;
+            spare.clear();
+            lock.notifyAll();   // what was kept is missing again
+        }
+        return layout;
+    }
+
+    /** The first frame's layout, waited for, when it is one the GPU converts at {@code width x height}; else null. */
+    private PlaneLayout firstLayoutAt(int width, int height) {
+        if (width != this.width || height != this.height) {
+            return null;
+        }
+        try {
+            if (!first.await(FIRST_FRAME_SECONDS, TimeUnit.SECONDS)) {
+                return null;
+            }
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            return null;
+        }
+        return firstLayout;
     }
 
     /** How long {@link #planes} waits for the first frame to be decoded before keeping the frames RGBA. */
@@ -300,18 +422,7 @@ public final class Footage implements Playable {
      */
     @Override
     public PlaneLayout planes(int width, int height) {
-        if (width != this.width || height != this.height) {
-            return null;
-        }
-        try {
-            if (!first.await(FIRST_FRAME_SECONDS, TimeUnit.SECONDS)) {
-                return null;
-            }
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-            return null;
-        }
-        PlaneLayout layout = firstLayout;
+        PlaneLayout layout = firstLayoutAt(width, height);
         if (layout == null) {
             return null;
         }
@@ -376,6 +487,9 @@ public final class Footage implements Playable {
     public void close() {
         synchronized (lock) {
             closed = true;
+            for (Made m : kept.values()) {
+                free(m);
+            }
             kept.clear();
             spare.clear();
             keptBytes = 0;
@@ -444,12 +558,47 @@ public final class Footage implements Playable {
             ended(0, Reasons.failed(e), e);
         } finally {
             first.countDown();   // a player waiting to hear the layout is not left waiting for a thread that has gone
+            if (lender != null) {
+                try {
+                    LOG.debug("{}: {} frames kept by a copy into lent memory, every other decoded there",
+                            clip.stamp().path(), clip.video().stageCopies());
+                } catch (RuntimeException | LinkageError e) {
+                    // only a count, for the log
+                }
+            }
             try {
                 clip.close();
             } catch (RuntimeException | LinkageError e) {
                 // Nothing left to give back, and a thread of its own has nobody to throw to.
                 LOG.debug("{} did not close: {}", clip.stamp().path(), e.toString());
             }
+            // The decoder is closed: nothing writes the lent memory again, and the lender may free it once it is done.
+            dropHeld();
+            Playable.Lender l = lender;
+            if (l != null) {
+                l.letGo(Kept::release);
+            }
+        }
+    }
+
+    /** The decoder's: let go of the frame it held, unless it is kept. */
+    private void dropHeld() {
+        Made h = heldChain;
+        heldChain = null;
+        if (h != null && h.kept != 0) {
+            synchronized (lock) {
+                if (!kept.containsValue(h)) {
+                    free(h);
+                }
+            }
+        }
+    }
+
+    /** A lent frame's reference released, once. Under lock. */
+    private void free(Made m) {
+        if (m.kept != 0 && !m.released) {
+            m.released = true;
+            Kept.release(m.kept);
         }
     }
 
@@ -472,7 +621,7 @@ public final class Footage implements Playable {
                 soughtAt = System.nanoTime();
                 video.seek(startOf(target) * 1000);
                 held = false;
-                heldChain = null;
+                dropHeld();
                 heldKept = false;
                 heldLive = false;
                 heldAt = -1;
@@ -497,6 +646,7 @@ public final class Footage implements Playable {
                     heldAt = -1;
                     return;
                 }
+                ensureRoom(video);
                 long t0 = System.nanoTime();
                 long pts = video.decode();
                 if (pts < 0) {
@@ -512,7 +662,7 @@ public final class Footage implements Playable {
                     at = sought ? Math.min(at, target) : at;
                 } else if (at <= heldAt) {
                     // Two frames on one number: the later one shows, in place of the earlier if that was kept already.
-                    heldChain = null;
+                    dropHeld();
                     heldLive = true;
                     if (heldKept) {
                         keepHeld(video);
@@ -524,7 +674,7 @@ public final class Footage implements Playable {
                     cover(heldAt, at - 1);
                 }
                 held = true;
-                heldChain = null;
+                dropHeld();
                 heldLive = true;
                 heldAt = at;
                 heldKept = false;
@@ -672,6 +822,11 @@ public final class Footage implements Playable {
         if (heldChain != null || !heldLive) {
             return;
         }
+        if (lender != null) {
+            // Decoded into lent memory already, where the GPU copies it from: kept by reference, copied by nobody.
+            heldChain = keepLent(video);
+            return;
+        }
         byte[][] chain;
         synchronized (lock) {
             chain = spare.poll();
@@ -684,7 +839,7 @@ public final class Footage implements Playable {
                 chain = new byte[][] {new byte[bytes]};
             }
             pack(video.planes(), planar, chain[0]);
-            heldChain = chain;
+            heldChain = new Made(chain);
             return;
         }
         boolean withMips = mips;
@@ -695,56 +850,145 @@ public final class Footage implements Playable {
         if (withMips) {
             OpaqueMips.fill(chain, width, height);
         }
-        heldChain = chain;
+        heldChain = new Made(chain);
     }
 
-    /** Whether {@code chain} is in the form the frames are kept in now: the planes packed, or RGBA levels. */
-    private boolean inForm(byte[][] chain) {
+    /**
+     * The frame the video holds, by reference where it was decoded in lent memory, or copied there once by the shim if
+     * it was decoded elsewhere (a decoder of its own memory, or none free). With no room even after more is lent and
+     * frames not wanted are let go, null: the frame is not made, and is asked for again.
+     */
+    private Made keepLent(Video video) {
+        long k = video.keep();
+        if (k == 0) {
+            makeRoom(video);
+            k = video.keep();
+        }
+        if (k == 0) {
+            if (!saidFull) {
+                saidFull = true;
+                LOG.warn("{}: no room left in the memory lent to decode into ({} bytes): {}", clip.stamp().path(),
+                        lentBytes, Video.lastError());
+            }
+            return null;
+        }
+        long[] offsets = new long[4];
+        int[] strides = new int[4];
+        int chunk = Kept.place(k, offsets, strides);
+        return new Made(k, chunk, offsets, strides, Math.max(1, video.stageBlock()));
+    }
+
+    /**
+     * The decoder's, before each frame it decodes into lent memory: lend more when fewer than {@link #LOW_ROOM} frames
+     * fit what is left, so the decoder is seldom given its own memory instead (which costs a copy when the frame is
+     * kept). Up to {@link #LEND_CAP} in all.
+     */
+    private void ensureRoom(Video video) {
+        if (lender == null) {
+            return;
+        }
+        int room = video.stageRoom();
+        if (room >= LOW_ROOM) {
+            return;
+        }
+        long block = video.stageBlock();
+        if (block <= 0) {
+            // Not known until the decoder first asks: a frame as the GPU takes it, with room for a decoder's padding.
+            block = form.frameBytes(width + 128, height + 128) + 8192;
+        }
+        lend(video, block * CHUNK_FRAMES);
+    }
+
+    /** No room for a frame: lend more if the cap allows, and let go of frames kept that the window does not want. */
+    private void makeRoom(Video video) {
+        long block = Math.max(1, video.stageBlock());
+        if (!lend(video, block * CHUNK_FRAMES)) {
+            synchronized (lock) {
+                Iterator<Map.Entry<Integer, Made>> it = kept.entrySet().iterator();
+                while (it.hasNext() && kept.size() > AHEAD + 1) {
+                    Map.Entry<Integer, Made> e = it.next();
+                    if (!wanted(e.getKey())) {
+                        it.remove();
+                        keptBytes -= e.getValue().bytes;
+                        letGo(e.getValue());
+                    }
+                }
+            }
+        }
+    }
+
+    /** Lend the decoder {@code bytes} more: whether it was, within the cap and the lender's chunks. */
+    private boolean lend(Video video, long bytes) {
+        if (lentBytes + bytes > LEND_CAP && lentBytes > 0) {
+            return false;
+        }
+        int chunk = lender.lend(bytes);
+        if (chunk < 0) {
+            return false;
+        }
+        video.stageInto(lender.chunk(chunk), chunk);
+        lentBytes += bytes;
+        return true;
+    }
+
+    /** Whether {@code made} is in the form the frames are kept in now: lent, the planes packed, or RGBA levels. */
+    private boolean inForm(Made made) {
+        if (lender != null) {
+            return made.kept != 0;
+        }
+        byte[][] chain = made.chain;
+        if (chain == null) {
+            return false;
+        }
         PlaneLayout planar = form;
         boolean packed = chain.length == 1 && planar != null && chain[0].length == planar.frameBytes(width, height);
         return planar == null ? chain[0].length == width * height * 4 : packed;
     }
 
-    private void keep(int k, byte[][] chain) {
-        if (!inForm(chain)) {
-            return;   // made as RGBA before the frames were asked for as planes: made again when wanted
-        }
-        long bytes = 0;
-        for (byte[] level : chain) {
-            bytes += level.length;
+    private void keep(int k, Made made) {
+        if (!inForm(made)) {
+            return;   // made in an earlier form than the frames were asked for since: made again when wanted
         }
         synchronized (lock) {
             if (closed) {
                 return;
             }
-            byte[][] old = kept.put(k, chain);
-            keptBytes += old == null ? bytes : 0;
+            Made old = kept.put(k, made);
+            keptBytes += old == null ? made.bytes : made.bytes - old.bytes;
             // The least recently shown go first, but never the window being played.
-            Iterator<Map.Entry<Integer, byte[][]>> it = kept.entrySet().iterator();
+            Iterator<Map.Entry<Integer, Made>> it = kept.entrySet().iterator();
             while (keptBytes > BUDGET && kept.size() > AHEAD + 1 && it.hasNext()) {
-                Map.Entry<Integer, byte[][]> e = it.next();
+                Map.Entry<Integer, Made> e = it.next();
                 if (wanted(e.getKey())) {
                     continue;
                 }
                 it.remove();
-                keptBytes -= bytes;
+                keptBytes -= e.getValue().bytes;
                 letGo(e.getValue());
             }
-            if (old != null && old != chain) {
+            if (old != null && old != made) {
                 letGo(old);
             }
         }
     }
 
     /**
-     * A chain no longer kept under some number: a spare, to be written again, unless it is still kept under another,
-     * is the one the decoder holds, or may be being copied by the player. Under lock.
+     * A frame no longer kept under some number. Unless it is still kept under another or is the one the decoder holds,
+     * a lent one's reference is released, and a chain becomes a spare, to be written again, unless the player may be
+     * copying it. Under lock.
      */
-    private void letGo(byte[][] chain) {
-        if (spare.size() >= SPARE || chain == lent || chain == heldChain || kept.containsValue(chain)) {
+    private void letGo(Made made) {
+        if (made == heldChain || kept.containsValue(made)) {
             return;
         }
-        spare.push(chain);
+        if (made.kept != 0) {
+            free(made);
+            return;
+        }
+        if (spare.size() >= SPARE || made.chain == lent) {
+            return;
+        }
+        spare.push(made.chain);
     }
 
     /**
