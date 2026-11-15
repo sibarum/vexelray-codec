@@ -657,7 +657,7 @@ public final class ImageView {
             if (p.plays()) {
                 // The frames go into a feed of their own, shown over the poster by the view's asked half once the first
                 // is due (ImageView.draw): the player makes them on its own thread, and nothing here paces them.
-                Feed f = Player.feed(p.frameWidth(), p.frameHeight());
+                Feed f = Player.feed(Seams.of(gui).feeds(), p.frameWidth(), p.frameHeight());
                 moving.image(f).imageFilter(filter, f.width(), f.height()).visible(true);
                 player = Player.play(f, p.motion(), () -> onPlayback.run());
                 playing = f;

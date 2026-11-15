@@ -70,8 +70,11 @@ public final class VideoView {
     /** Whether the end has been said for the player playing now. */
     private boolean endSaid;
     private String failure;
+    /** The tree this is in: where its feeds are made, on its device once a window shows it. */
+    private final Gui gui;
 
     public VideoView(Gui gui, Length padY, Length padX) {
+        this.gui = gui;
         this.plate = gui.box().size(Length.ZERO, Length.ZERO).floatAt(Length.ZERO, Length.ZERO).hitInert(true)
                 .visible(false);
         this.stage = gui.column().width(Length.FILL).height(Length.FILL).clip(true).scroll(false, false)
@@ -108,7 +111,7 @@ public final class VideoView {
         lengthMicros = info.durationMicros();
         Motion motion = new Motion(clip.stamp(), Footage.count(info), Math.max(1, info.durationMicros() / 1000), 0,
                 (m, side) -> new Footage(clip), true);
-        Feed feed = Player.feed(clip.width(), clip.height());
+        Feed feed = Player.feed(Seams.of(gui).feeds(), clip.width(), clip.height());
         Player p = Player.play(feed, motion, this::changed);
         p.loop(loop);
         if (!start) {
@@ -137,7 +140,7 @@ public final class VideoView {
         width = video.width();
         height = video.height();
         lengthMicros = video.durationMicros();
-        Feed feed = Player.feed(video.width(), video.height());
+        Feed feed = Player.feed(Seams.of(gui).feeds(), video.width(), video.height());
         Player p = Player.play(feed, video.motion(), this::changed);
         p.loop(loop);
         if (!start) {

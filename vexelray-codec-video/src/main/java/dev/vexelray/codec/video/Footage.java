@@ -106,6 +106,8 @@ public final class Footage implements Playable {
 
     /** Chains let go of, to be written again rather than made: at most {@link #SPARE}. */
     private final ArrayDeque<byte[][]> spare = new ArrayDeque<>();
+    /** Whether a frame is given its mips here ({@link #mips}): not when a device feed shows it, whose GPU makes them. */
+    private volatile boolean mips = true;
     /** The chain {@link #frame} last gave out, which the player may be copying: never written again until another is. */
     private byte[][] lent;
 
@@ -273,6 +275,12 @@ public final class Footage implements Playable {
             }
             return chain;
         }
+    }
+
+    /** Shown through a device feed, a frame is converted into its first level and given no mips here. */
+    @Override
+    public void mips(boolean wanted) {
+        mips = wanted;
     }
 
     @Override
@@ -591,11 +599,14 @@ public final class Footage implements Playable {
         synchronized (lock) {
             chain = spare.poll();
         }
-        if (chain == null) {
-            chain = OpaqueMips.chain(width, height);
+        boolean withMips = mips;
+        if (chain == null || (withMips && chain.length == 1)) {
+            chain = withMips ? OpaqueMips.chain(width, height) : new byte[][] {new byte[width * height * 4]};
         }
         video.convert(chain[0]);
-        OpaqueMips.fill(chain, width, height);
+        if (withMips) {
+            OpaqueMips.fill(chain, width, height);
+        }
         heldChain = chain;
     }
 

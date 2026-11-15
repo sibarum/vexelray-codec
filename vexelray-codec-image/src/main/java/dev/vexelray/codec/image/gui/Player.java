@@ -49,6 +49,11 @@ public final class Player implements AutoCloseable {
 
     /** A feed of three slots: one shown, one landing, one being written. */
     public static final int SLOTS = 3;
+    /**
+     * A device feed of four: one shown, one waiting out the frames on the GPU that showed it, one landing, one being
+     * written. A device feed's slot comes free a loop iteration after it is replaced, not at once.
+     */
+    public static final int DEVICE_SLOTS = 4;
 
     /** How soon a frame the decoder has not made yet is looked for again: the producer's wait, never the GUI's. */
     static final long LOOK_AGAIN_NANOS = 4_000_000L;
@@ -181,6 +186,16 @@ public final class Player implements AutoCloseable {
      */
     public static Feed feed(int width, int height) {
         return Feed.of(width, height, SLOTS, true);
+    }
+
+    /**
+     * An empty feed for a picture that plays, on the device {@code feeds} makes feeds on: {@link #DEVICE_SLOTS} slots of
+     * {@code width x height}, each written as level 0 into staging and landed by the frame that shows it, its mips made
+     * on the GPU (vexelray-gui's docs/plans/device-feed.md). With {@code feeds} null, a tree no window has shown, the
+     * device-free {@link #feed(int, int)}.
+     */
+    public static Feed feed(dev.vexelray.gui.core.Feeds feeds, int width, int height) {
+        return feeds == null ? feed(width, height) : feeds.picture(width, height, DEVICE_SLOTS);
     }
 
     /**
@@ -541,8 +556,14 @@ public final class Player implements AutoCloseable {
                 return sleep;
             }
         }
-        for (int l = 0; l < feed.levels(); l++) {
-            System.arraycopy(copyChain[l], 0, feed.level(copySlot, l), 0, feed.levelBytes(l));
+        if (feed.onDevice()) {
+            // Level 0 into the slot's staging, on this thread; the frame that shows it lands it and makes its mips.
+            java.lang.foreign.MemorySegment.copy(java.lang.foreign.MemorySegment.ofArray(copyChain[0]), 0,
+                    feed.staging(copySlot), 0, feed.levelBytes(0));
+        } else {
+            for (int l = 0; l < feed.levels(); l++) {
+                System.arraycopy(copyChain[l], 0, feed.level(copySlot, l), 0, feed.levelBytes(l));
+            }
         }
         synchronized (lock) {
             handOver();
@@ -575,6 +596,8 @@ public final class Player implements AutoCloseable {
             }
             return false;
         }
+        // A device feed's mips are the GPU's: the frames need only their first level.
+        m.mips(!feed.onDevice());
         synchronized (lock) {
             if (closed) {
                 m.close();

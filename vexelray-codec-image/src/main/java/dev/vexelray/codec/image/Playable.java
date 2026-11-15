@@ -55,6 +55,14 @@ public interface Playable extends AutoCloseable {
     }
 
     /**
+     * Whether {@link #frame}'s chains need their levels below the first: false when they are shown through a device
+     * feed, whose mips the GPU makes, so a frame costs only its first level. Said once, before the first {@link #want};
+     * a source that cannot leave them out may ignore it, since level 0 is all such a consumer reads. True until said.
+     */
+    default void mips(boolean wanted) {
+    }
+
+    /**
      * A clock this keeps for itself, which whoever shows it keeps time by instead of its own; or null, the usual
      * case, when it has none. A video with sound has one: sound is heard at the speaker's own pace, so the frames
      * follow the sound, never the other way round.
