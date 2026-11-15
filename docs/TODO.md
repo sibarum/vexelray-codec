@@ -27,7 +27,9 @@ and belongs to vexelray-gui's device feed (`vexelray-gui/docs/plans/device-feed.
   the CPU; the GPU copies the planes from where the decoder put them. dav1d's AV1 did not (its wrapper has a picture
   pool of its own), so its kept frames were copied once in the shim; on Windows, FFmpeg is now built from source with
   ffmpeg-wrapper's `native/patches/libdav1d-get-buffer.patch`, and AV1 decodes in place too (0 copies seen in
-  Rasterware). Linux's prebuilt FFmpeg still copies AV1 once. A source the GPU cannot convert, or a device-free feed, still takes
+  Rasterware). Linux's build does the same from source on
+  AlmaLinux 8 (`build-in-container.sh`, glibc 2.28), written and not yet run; until it runs, the Linux natives in
+  ffmpeg-wrapper predate the staging functions, and its `CApi` fails to load there. A source the GPU cannot convert, or a device-free feed, still takes
   the chains above.
 - **`Videos.open` calls a 1080p AVI "a folder".** Seen 2026-11-14 with `big_buck_bunny_1080p_stereo.avi` in the
   GitHub folder, a regular file with two hard links, through the video-player demo launched with `java` directly as
