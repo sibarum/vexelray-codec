@@ -10,7 +10,7 @@ ones the window wants are scaled to RGBA, in one threaded swscale pass straight 
 about 2 ms at 1080p and 4 ms from a 2160p source, and both 60 fps test clips play at 60. What is still on the CPU,
 and belongs to vexelray-gui's device feed (`vexelray-gui/docs/plans/device-feed.md`, steps 2 and 3, open question 7):
 
-- **Conversion to RGBA.** The decoded planes are ready for it: `Video.planes()` gives the held frame as the decoder
+- ~~**Conversion to RGBA.**~~ **Done 2026-11-14** for a video at its own size shown in a window: `Footage` keeps the decoder's planes packed (`Playable.planes`, from the first decoded frame) and the device feed converts them on the GPU (`yuv420p`, `nv12`, `yuv420p10le`, `p010le`). A scaled source (a 2160p clip opened at a side of 1920) still goes through `convert`, since its planes are not the feed's size: making the feed at the coded size would move that to the GPU too. *What it was:* The decoded planes are ready for it: `Video.planes()` gives the held frame as the decoder
   made it, as `Planes`. That is the pixel format by FFmpeg's name (`yuv420p`, `nv12`, `yuv420p10le`), the coded size,
   each plane's native memory, stride and rows, the matrix (601, 709 or 2020) and whether the range is full. Step 3
   uploads those planes and converts in the shader. The planes are valid only until the next `decode`, `seek` or
@@ -25,7 +25,7 @@ and belongs to vexelray-gui's device feed (`vexelray-gui/docs/plans/device-feed.
   GitHub folder, a regular file with two hard links, through the video-player demo launched with `java` directly as
   well as through Maven: the readout said `a folder`, which only `Files.isDirectory(path)` answers. An mp4 and an mkv
   in other folders opened. Not looked into.
-- **Formats beyond 8-bit 4:2:0.** `convert` handles any format swscale knows. A shader path needs a converter per
+- **Formats beyond 8-bit 4:2:0.** *The four above are done.* `convert` handles any format swscale knows. A shader path needs a converter per
   layout: at least `yuv420p`, `nv12` and the 10-bit `p010`/`yuv420p10le`. Anything else can fall back to `convert`.
 
 ## A Rasterware video profile
